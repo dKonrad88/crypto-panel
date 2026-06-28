@@ -93,11 +93,29 @@ def brapi_quote(symbol):
 
 
 def fetch_fx():
+    # Frankfurter (ECB, global, cloud-friendly) — historico + atual
+    try:
+        end = datetime.date.today()
+        start = end - datetime.timedelta(days=760)
+        d = get(f"https://api.frankfurter.app/{start}..{end}?from=USD&to=BRL")
+        ser = []
+        for ds, v in (d.get("rates") or {}).items():
+            br = v.get("BRL")
+            if br is None:
+                continue
+            t = int(datetime.datetime.strptime(ds, "%Y-%m-%d").replace(tzinfo=datetime.timezone.utc).timestamp()) * 1000
+            ser.append([t, br, br, br, br, 0])
+        ser.sort(key=lambda z: z[0])
+        cur = get("https://api.frankfurter.app/latest?from=USD&to=BRL")["rates"]["BRL"]
+        if ser:
+            return ser, float(cur)
+    except Exception as e:
+        print("WARN fx frankfurter", e)
+    # fallback: AwesomeAPI (BR) — pode falhar de IP de nuvem
     d = get("https://economia.awesomeapi.com.br/json/daily/USD-BRL/360")
-    ser = sorted(({"t": int(x["timestamp"]) * 1000, "r": float(x["bid"])} for x in d), key=lambda z: z["t"])
-    cd = [[s["t"], s["r"], s["r"], s["r"], s["r"], 0] for s in ser]
-    cur = get("https://economia.awesomeapi.com.br/json/last/USD-BRL")["USDBRL"]
-    return cd, float(cur["bid"])
+    ser = sorted(([int(x["timestamp"]) * 1000, float(x["bid"]), float(x["bid"]), float(x["bid"]), float(x["bid"]), 0] for x in d), key=lambda z: z[0])
+    cur = get("https://economia.awesomeapi.com.br/json/last/USD-BRL")["USDBRL"]["bid"]
+    return ser, float(cur)
 
 
 def main():
