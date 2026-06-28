@@ -306,27 +306,44 @@ function trendMed(price,e50,e200){
   return {t:'Lateral',c:'flat',a:'▬'};
 }
 
-async function loadAsset(a){
-  // ticker 24h + candles diários
-  const [tk, kl] = await Promise.all([
-    binanceFetch('/api/v3/ticker/24hr?symbol='+a.binance),
-    binanceFetch('/api/v3/klines?symbol='+a.binance+'&interval=1d&limit=400'),
-  ]);
-  const close = kl.map(k=>+k[4]);
-  const vol = kl.map(k=>+k[5]);
-  const price = +tk.lastPrice;
-  const ch24 = +tk.priceChangePercent;
-  const n = close.length;
-  const ch7 = n>8 ? (close[n-1]/close[n-8]-1)*100 : null;
-  const ch30 = n>31 ? (close[n-1]/close[n-31]-1)*100 : null;
+/* fallback de mesma origem (gerado pelo coletor) — usado se a Binance falhar */
+const DATA_BASE='./data/';
+let FB={cache:null,candles:null,tried:false};
+async function ensureFallback(){
+  if(FB.tried)return FB; FB.tried=true;
+  try{const [c,k]=await Promise.all([getJSON(DATA_BASE+'cache.json'),getJSON(DATA_BASE+'candles_1d.json')]);
+    FB.cache=c;FB.candles=k;}catch(e){/* sem dados coletados ainda */}
+  return FB;
+}
+function computeFromCloses(a, close, vol, price, ch24){
+  const n=close.length, i=n-1, j=n-2;
+  const ch7 = n>8 ? (close[i]/close[n-8]-1)*100 : null;
+  const ch30 = n>31 ? (close[i]/close[n-31]-1)*100 : null;
   const e20=ema(close,20),e50=ema(close,50),e200=ema(close,200);
   const r=rsi(close,14),m=macd(close);
-  const i=n-1;
-  const j=n-2; // última vela FECHADA (a última é o dia em andamento → volume parcial)
-  const volAvg = sma(vol,20)[j];
-  return {a, price, ch24, ch7, ch30,
-    e20:e20[i], e50:e50[i], e200:e200[i],
+  const volAvg=sma(vol,20)[j];
+  return {a, price, ch24, ch7, ch30, e20:e20[i], e50:e50[i], e200:e200[i],
     rsi:r[i], macdHist:m.hist[i], vol:vol[j], volRatio: volAvg?vol[j]/volAvg:null};
+}
+async function loadAsset(a){
+  try{
+    const [tk, kl] = await Promise.all([
+      binanceFetch('/api/v3/ticker/24hr?symbol='+a.binance),
+      binanceFetch('/api/v3/klines?symbol='+a.binance+'&interval=1d&limit=400'),
+    ]);
+    const close=kl.map(k=>+k[4]), vol=kl.map(k=>+k[5]);
+    return {source:'live', ...computeFromCloses(a,close,vol,+tk.lastPrice,+tk.priceChangePercent)};
+  }catch(e){
+    const fb=await ensureFallback();
+    const arr=fb.candles&&fb.candles.assets&&fb.candles.assets[a.id];
+    if(arr&&arr.length){
+      const ca=(fb.cache&&fb.cache.assets&&fb.cache.assets[a.id])||{};
+      const close=arr.map(c=>c[4]), vol=arr.map(c=>c[5]);
+      const price=ca.price!=null?ca.price:close[close.length-1];
+      return {source:'cache', ...computeFromCloses(a,close,vol,price,ca.ch24!=null?ca.ch24:null)};
+    }
+    throw e;
+  }
 }
 
 function renderAssetRow(d){
@@ -361,15 +378,18 @@ async function renderPainel(){
   host.innerHTML = ASSETS.map(a=>`<div class="asset"><div class="a-head">
     <span class="a-sym">${a.id}</span><span class="loading">carregando…</span></div></div>`).join('');
   setSrc('warn','carregando…');
-  let okCount=0;
-  const rows = await Promise.all(ASSETS.map(async a=>{
-    try{const d=await loadAsset(a);okCount++;return renderAssetRow(d);}
-    catch(e){return `<div class="asset"><div class="a-head">
-      <span class="a-sym">${a.id}</span><span class="down">indisponível (${e.message})</span></div></div>`;}
+  const results = await Promise.all(ASSETS.map(async a=>{
+    try{return await loadAsset(a);}catch(e){return {a,error:e.message};}
   }));
-  host.innerHTML = rows.join('');
-  setSrc(okCount===ASSETS.length?'ok':okCount?'warn':'err',
-    okCount===ASSETS.length?'Binance · ao vivo':okCount?`parcial (${okCount}/${ASSETS.length})`:'Binance indisponível');
+  host.innerHTML = results.map(d=>d.error
+    ? `<div class="asset"><div class="a-head"><span class="a-sym">${d.a.id}</span><span class="down">indisponível (${d.error})</span></div></div>`
+    : renderAssetRow(d)).join('');
+  const live=results.filter(d=>d.source==='live').length;
+  const cache=results.filter(d=>d.source==='cache').length;
+  const err=results.filter(d=>d.error).length;
+  if(err===ASSETS.length) setSrc('err','sem dados (Binance e cache indisponíveis)');
+  else if(cache>0) setSrc('warn',`cache local${live?` · +${live} ao vivo`:''} (Binance bloqueada?)`);
+  else setSrc('ok','Binance · ao vivo');
   loadOnchainTeasers();
 }
 
@@ -474,14 +494,23 @@ function runBacktest(k,strat,pa,pb,feePct,cap){
   return {trades,equity,totalRet,bh,mdd,sharpe,winRate,avg,exposure,finalEq,n:c.length};
 }
 
-let BT_KLINES=null, BT_KEY='';
+let BT_KLINES=null, BT_KEY='', BT_SRC='live';
 async function ensureKlines(){
   const sym=document.getElementById('bt-asset').value;
   const tf=document.getElementById('bt-tf').value;
   const lim=+document.getElementById('bt-limit').value;
   const key=sym+tf+lim;
   if(key!==BT_KEY){
-    BT_KLINES=await binanceFetch(`/api/v3/klines?symbol=${sym}&interval=${tf}&limit=${lim}`);
+    try{
+      BT_KLINES=await binanceFetch(`/api/v3/klines?symbol=${sym}&interval=${tf}&limit=${lim}`);
+      BT_SRC='live';
+    }catch(e){
+      const id=(ASSETS.find(x=>x.binance===sym)||{}).id;
+      const fb=await ensureFallback();
+      const arr=fb.candles&&fb.candles.assets&&fb.candles.assets[id];
+      if(tf==='1d'&&arr&&arr.length){ BT_KLINES=arr.slice(-lim); BT_SRC='cache'; }
+      else throw new Error(tf==='1d'?'Binance indisponível e sem cache local.':'Binance indisponível; cache só tem velas 1d — selecione 1d.');
+    }
     BT_KEY=key;
   }
   return BT_KLINES;
@@ -526,7 +555,8 @@ function renderBtResult(r,cap){
     <td class="num ${cls(t.ret)}">${fmtPct(t.ret)}</td></tr>`).join('')
     || `<tr><td colspan="6" class="dim" style="text-align:center;padding:12px">Nenhum trade gerado</td></tr>`;
   document.getElementById('bt-eqhint').textContent=
-    `Curva de capital · ${r.n} velas · entrada/saída no fechamento da vela do sinal (sem look-ahead de tick).`;
+    `Curva de capital · ${r.n} velas · entrada/saída no fechamento da vela do sinal (sem look-ahead de tick).`
+    + (BT_SRC==='cache'?' · fonte: cache local (Binance indisponível)':'');
 }
 function drawEquity(eq,cap){
   const svg=document.getElementById('bt-equity');
