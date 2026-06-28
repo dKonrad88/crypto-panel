@@ -108,6 +108,14 @@
   .spark{height:34px;width:160px;display:block}
   .note{color:var(--dim);font-size:11px;margin-top:4px}
   .loading{color:var(--dim)}
+  /* mercado / carteira */
+  .mkt-div{font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--accent);
+    padding:14px 4px 4px;margin-top:4px;border-bottom:1px solid var(--line)}
+  .pf-head{display:flex;flex-wrap:wrap;gap:26px;padding:14px 6px;border-bottom:1px solid var(--line)}
+  .pf-head .s{display:flex;flex-direction:column;gap:2px}
+  .pf-head .s .k{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px}
+  .pf-head .s .v{font-size:16px}
+  .sig{border:1px solid var(--line);border-radius:3px;padding:1px 6px;font-size:11px}
 </style>
 </head>
 <body>
@@ -117,6 +125,7 @@
     <button data-view="painel" class="active"><kbd>1</kbd>Painel</button>
     <button data-view="backtest"><kbd>2</kbd>Backtest</button>
     <button data-view="onchain"><kbd>3</kbd>On-chain</button>
+    <button data-view="carteira"><kbd>4</kbd>Carteira</button>
   </nav>
   <div class="spacer"></div>
   <div class="status">
@@ -221,6 +230,60 @@
     <div id="onchain"></div>
     <div class="hint">TVL (e seu histórico) via DefiLlama; on-chain de BTC via mempool.space — tudo grátis e sem chave. Métricas "inteligentes" (netflow de exchange, SOPR, MVRV) são pagas e ficam fora. Gas/validators virão pelo coletor.</div>
   </section>
+
+  <!-- CARTEIRA / ROBÔ -->
+  <section class="view" id="view-carteira">
+    <div class="controls">
+      <div class="ctl"><label>Universo</label><select id="pf-uni"></select></div>
+      <div class="ctl"><label>Estratégia</label>
+        <select id="pf-strat">
+          <option value="emaCross">Cruzamento EMA</option>
+          <option value="smaCross">Cruzamento SMA</option>
+          <option value="rsi">RSI (reversão)</option>
+          <option value="macd">MACD (cruzamento)</option>
+          <option value="bbBreak">Bollinger (rompimento)</option>
+          <option value="trend200">Tendência &gt; EMA200</option>
+        </select></div>
+      <div class="ctl"><label id="pf-lbl-a">EMA rápida</label><input type="number" id="pf-pa" value="20"></div>
+      <div class="ctl"><label id="pf-lbl-b">EMA lenta</label><input type="number" id="pf-pb" value="50"></div>
+      <div class="ctl"><label>Início</label>
+        <select id="pf-start">
+          <option value="0">Máximo histórico</option>
+          <option value="365">Há 1 ano</option>
+          <option value="180">Há 6 meses</option>
+          <option value="90">Há 3 meses</option>
+          <option value="30">Há 30 dias</option>
+          <option value="2">Robô — desde hoje</option>
+        </select></div>
+      <div class="ctl"><label>Banca R$</label><input type="number" id="pf-banca" value="10000" min="100" step="100"></div>
+      <div class="ctl"><label>Máx posições</label><input type="number" id="pf-max" value="5" min="1" max="20"></div>
+      <div class="ctl"><label>Taxa %</label><input type="number" id="pf-fee" value="0.1" min="0" step="0.05"></div>
+      <button class="btn primary" id="pf-run">▶ Rodar carteira</button>
+    </div>
+
+    <div class="pf-head" id="pf-head"><div class="placeholder">Configure e clique <b>Rodar carteira</b>. Início no passado = backtest; "desde hoje" = robô paper que evolui com os preços.</div></div>
+
+    <div class="bt-grid">
+      <div class="panelbox">
+        <h3>Posições <span class="dim" id="pf-possub" style="text-transform:none;font-weight:400"></span></h3>
+        <div class="scroll" style="max-height:340px"><table class="trades" id="pf-pos"><thead></thead><tbody></tbody></table></div>
+      </div>
+      <div class="panelbox">
+        <h3>Patrimônio</h3>
+        <div class="body">
+          <svg class="equity" id="pf-equity" viewBox="0 0 600 130" preserveAspectRatio="none"></svg>
+          <div id="pf-stats" class="metrics" style="margin-top:12px"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panelbox" style="margin:0 6px 16px">
+      <h3>Trades fechados <span class="dim" id="pf-trsub" style="text-transform:none;font-weight:400"></span></h3>
+      <div class="scroll" style="max-height:240px"><table class="trades" id="pf-trades">
+        <thead><tr><th>Ativo</th><th>Entrada</th><th>Saída</th><th>Px ent.</th><th>Px saí.</th><th>Ret%</th></tr></thead><tbody></tbody></table></div>
+    </div>
+    <div class="hint">Mesmo motor pros dois usos — início no passado: "como teria ido"; início "desde hoje": robô paper que evolui com os preços que chegam (recalcula a cada atualização). Banca em R$ (cripto/US convertidos por USD-BRL). Alocação: banca ÷ máx posições por sinal de compra. <b>Simulação — sem ordem real.</b></div>
+  </section>
 </main>
 
 <script src="https://s3.tradingview.com/tv.js"></script>
@@ -236,6 +299,8 @@ const ASSETS = [
   {id:'XRP', name:'XRP',     binance:'XRPUSDT', tv:'BINANCE:XRPUSDT', llama:'XRPL'},
   {id:'SUI', name:'Sui',     binance:'SUIUSDT', tv:'BINANCE:SUIUSDT', llama:'Sui'},
 ];
+ASSETS.forEach(a=>{a.type='crypto';a.ccy='USDT';a.market='Cripto';});
+let STOCKS_ADDED=false;
 const BINANCE_HOSTS = ['https://api.binance.com','https://data-api.binance.vision'];
 
 /* ============================================================
@@ -331,11 +396,22 @@ function trendMed(price,e50,e200){
 /* fallback de mesma origem (gerado pelo coletor) — usado se a Binance falhar */
 const DATA_BASE='./data/';
 let FB={cache:null,candles:null,tried:false};
+let FX_CUR=null, FX_SERIES=[];   // [diaEpoch, taxaUSDBRL]
 async function ensureFallback(){
   if(FB.tried)return FB; FB.tried=true;
   try{const [c,k]=await Promise.all([getJSON(DATA_BASE+'cache.json'),getJSON(DATA_BASE+'candles_1d.json')]);
-    FB.cache=c;FB.candles=k;}catch(e){/* sem dados coletados ainda */}
+    FB.cache=c;FB.candles=k;
+    if(c&&c.fx&&c.fx.USDBRL)FX_CUR=c.fx.USDBRL;
+    if(k&&k.assets&&k.assets.USDBRL)FX_SERIES=k.assets.USDBRL.map(x=>[Math.floor(x[0]/86400000),x[4]]);
+    addStocksFromUniverse(c);
+  }catch(e){/* sem dados coletados ainda */}
   return FB;
+}
+function addStocksFromUniverse(c){
+  if(STOCKS_ADDED||!c||!c.universe)return;
+  const have=new Set(ASSETS.map(a=>a.id));
+  c.universe.filter(u=>u.type==='stock'&&!have.has(u.id)).forEach(u=>ASSETS.push(u));
+  STOCKS_ADDED=true;
 }
 function computeFromCloses(a, close, vol, price, ch24){
   const n=close.length, i=n-1, j=n-2;
@@ -347,7 +423,18 @@ function computeFromCloses(a, close, vol, price, ch24){
   return {a, price, ch24, ch7, ch30, e20:e20[i], e50:e50[i], e200:e200[i],
     rsi:r[i], macdHist:m.hist[i], vol:vol[j], volRatio: volAvg?vol[j]/volAvg:null};
 }
+function loadFromCache(a){
+  const arr=FB.candles&&FB.candles.assets&&FB.candles.assets[a.id];
+  if(arr&&arr.length){
+    const ca=(FB.cache&&FB.cache.assets&&FB.cache.assets[a.id])||{};
+    const close=arr.map(c=>c[4]), vol=arr.map(c=>c[5]);
+    const price=ca.price!=null?ca.price:close[close.length-1];
+    return {source:'cache', ...computeFromCloses(a,close,vol,price,ca.ch24!=null?ca.ch24:null)};
+  }
+  return null;
+}
 async function loadAsset(a){
+  if(a.type==='stock'){ await ensureFallback(); const r=loadFromCache(a); if(r)return r; throw new Error('sem dados'); }
   try{
     const [tk, kl] = await Promise.all([
       binanceFetch('/api/v3/ticker/24hr?symbol='+a.binance),
@@ -356,14 +443,8 @@ async function loadAsset(a){
     const close=kl.map(k=>+k[4]), vol=kl.map(k=>+k[5]);
     return {source:'live', ...computeFromCloses(a,close,vol,+tk.lastPrice,+tk.priceChangePercent)};
   }catch(e){
-    const fb=await ensureFallback();
-    const arr=fb.candles&&fb.candles.assets&&fb.candles.assets[a.id];
-    if(arr&&arr.length){
-      const ca=(fb.cache&&fb.cache.assets&&fb.cache.assets[a.id])||{};
-      const close=arr.map(c=>c[4]), vol=arr.map(c=>c[5]);
-      const price=ca.price!=null?ca.price:close[close.length-1];
-      return {source:'cache', ...computeFromCloses(a,close,vol,price,ca.ch24!=null?ca.ch24:null)};
-    }
+    await ensureFallback();
+    const r=loadFromCache(a); if(r)return r;
     throw e;
   }
 }
@@ -378,7 +459,7 @@ function renderAssetRow(d){
     <div class="a-head">
       <span class="a-sym">${a.id}</span>
       <span class="a-name">${a.name}</span>
-      <span class="a-price num">${fmtPrice(d.price)} <span class="dim" style="font-size:10px">USDT</span></span>
+      <span class="a-price num">${fmtPrice(d.price)} <span class="dim" style="font-size:10px">${a.ccy||'USDT'}</span></span>
       <span class="chg num"><span class="lbl">24h </span><span class="${cls(d.ch24)}">${fmtPct(d.ch24)}</span></span>
       <span class="chg num"><span class="lbl">7d </span><span class="${cls(d.ch7)}">${fmtPct(d.ch7)}</span></span>
       <span class="chg num"><span class="lbl">30d </span><span class="${cls(d.ch30)}">${fmtPct(d.ch30)}</span></span>
@@ -390,7 +471,7 @@ function renderAssetRow(d){
       <span>MACD <b class="${d.macdHist>0?'up':d.macdHist<0?'down':''}">${macdSign}</b></span>
       <span>Vol <b class="num">${d.volRatio==null?'—':d.volRatio.toFixed(2)+'×'}</b> méd</span>
       <span>Curto <b class="${ts.c}">${ts.a} ${ts.t}</b></span>
-      <span class="oc-teaser dim" data-id="${a.id}">on-chain…</span>
+      ${a.type==='crypto'?`<span class="oc-teaser dim" data-id="${a.id}">on-chain…</span>`:''}
     </div>
   </div>`;
 }
@@ -403,9 +484,14 @@ async function renderPainel(){
   const results = await Promise.all(ASSETS.map(async a=>{
     try{return await loadAsset(a);}catch(e){return {a,error:e.message};}
   }));
-  host.innerHTML = results.map(d=>d.error
-    ? `<div class="asset"><div class="a-head"><span class="a-sym">${d.a.id}</span><span class="down">indisponível (${d.error})</span></div></div>`
-    : renderAssetRow(d)).join('');
+  let curM=null;
+  host.innerHTML = results.map(d=>{
+    let pre=''; const m=d.a&&d.a.market;
+    if(m&&m!==curM){curM=m;pre=`<div class="mkt-div">${m}</div>`;}
+    return pre+(d.error
+      ? `<div class="asset"><div class="a-head"><span class="a-sym">${d.a.id}</span><span class="down">indisponível (${d.error})</span></div></div>`
+      : renderAssetRow(d));
+  }).join('');
   const live=results.filter(d=>d.source==='live').length;
   const cache=results.filter(d=>d.source==='cache').length;
   const err=results.filter(d=>d.error).length;
@@ -428,7 +514,7 @@ async function loadOnchainTeasers(){
   }catch(e){setTeaser('BTC','on-chain n/d');}
   // demais via DefiLlama TVL
   for(const a of ASSETS){
-    if(a.id==='BTC')continue;
+    if(a.type!=='crypto'||a.id==='BTC')continue;
     try{
       const s=await getJSON('https://api.llama.fi/v2/historicalChainTvl/'+a.llama);
       const tvl=s[s.length-1].tvl;
@@ -730,13 +816,12 @@ function onStratChange(){
 ============================================================ */
 async function renderOnchain(){
   const host=document.getElementById('onchain');
-  host.innerHTML=ASSETS.map(a=>`<div class="oc-asset" id="oc-${a.id}">
+  const cryptos=ASSETS.filter(a=>a.type==='crypto');
+  host.innerHTML=cryptos.map(a=>`<div class="oc-asset" id="oc-${a.id}">
     <div class="oc-head"><span class="oc-sym">${a.id}</span><span class="loading">carregando on-chain…</span></div>
   </div>`).join('');
-  // BTC
   renderOcBTC();
-  // chains com TVL
-  for(const a of ASSETS){ if(a.id!=='BTC') renderOcChain(a); }
+  for(const a of cryptos){ if(a.id!=='BTC') renderOcChain(a); }
 }
 async function renderOcBTC(){
   const box=document.getElementById('oc-BTC');
@@ -787,6 +872,162 @@ function sparkSVG(vals){
 }
 
 /* ============================================================
+   CARTEIRA / ROBÔ (paper, multi-ativo, banca em R$)
+============================================================ */
+const DAY=86400000;
+function fxAtDay(day){
+  if(!FX_SERIES.length) return FX_CUR||5.0;
+  if(day<=FX_SERIES[0][0]) return FX_SERIES[0][1];
+  let lo=0,hi=FX_SERIES.length-1,ans=FX_SERIES[FX_SERIES.length-1][1];
+  while(lo<=hi){const m=(lo+hi)>>1; if(FX_SERIES[m][0]<=day){ans=FX_SERIES[m][1];lo=m+1;}else hi=m-1;}
+  return ans;
+}
+function toBRL(v,ccy,fx){ return ccy==='BRL'? v : v*fx; }
+function fmtBRL(v){ if(v==null||isNaN(v))return '—'; return 'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function dayToDate(day){ return new Date(day*DAY).toLocaleDateString('pt-BR'); }
+
+function runPortfolio(items,strat,pa,pb,banca,maxPos,feePct,startDaysAgo){
+  const fee=feePct/100;
+  const per=items.map(it=>{
+    const k=it.candles; const pos=strategyPositions(strat,k,pa,pb);
+    const map=new Map();
+    k.forEach((c,i)=>map.set(Math.floor(c[0]/DAY),{c:c[4],pos:pos[i]}));
+    return {a:it.a,map};
+  }).filter(p=>p.map.size>5);
+  if(!per.length) return null;
+  const daysSet=new Set(); per.forEach(p=>p.map.forEach((_,d)=>daysSet.add(d)));
+  const days=[...daysSet].sort((x,y)=>x-y);
+  const maxDay=days[days.length-1];
+  const startDay = startDaysAgo>0 ? maxDay-startDaysAgo : days[0];
+  const ff=per.map(()=>({c:null,pos:0,started:false}));
+  let cash=banca; const open={}; const trades=[]; const eq=[];
+  const alloc=banca/maxPos; let peak=-Infinity,mdd=0;
+  for(const day of days){
+    per.forEach((p,idx)=>{const e=p.map.get(day); if(e){ff[idx]={c:e.c,pos:e.pos,started:true};}});
+    if(day<startDay) continue;
+    const fx=fxAtDay(day);
+    per.forEach((p,idx)=>{const id=p.a.id,st=ff[idx];
+      if(open[id]&&st.started&&st.pos===0){
+        const px=toBRL(st.c,p.a.ccy,fx); cash+=open[id].qty*px*(1-fee);
+        trades.push({id,name:p.a.name,entryDay:open[id].entryDay,exitDay:day,
+          entryBRL:open[id].entryBRL,exitBRL:px,entryNative:open[id].entryNative,exitNative:st.c,ret:(px/open[id].entryBRL-1)*100});
+        delete open[id];
+      }});
+    per.forEach((p,idx)=>{const id=p.a.id,st=ff[idx];
+      if(!open[id]&&st.started&&st.pos===1&&Object.keys(open).length<maxPos&&cash>1){
+        const spend=Math.min(alloc,cash); const px=toBRL(st.c,p.a.ccy,fx);
+        const qty=spend*(1-fee)/px; cash-=spend;
+        open[id]={qty,entryBRL:px,entryNative:st.c,entryDay:day,a:p.a};
+      }});
+    let pv=0; per.forEach((p,idx)=>{const id=p.a.id; if(open[id]){pv+=open[id].qty*toBRL(ff[idx].c,p.a.ccy,fx);}});
+    const e=cash+pv; eq.push([day,e]); if(e>peak)peak=e; const dd=(e/peak-1)*100; if(dd<mdd)mdd=dd;
+  }
+  if(!eq.length) return null;
+  const fxL=fxAtDay(maxDay);
+  const positions=Object.values(open).map(o=>{
+    const idx=per.findIndex(p=>p.a.id===o.a.id); const cur=toBRL(ff[idx].c,o.a.ccy,fxL);
+    return {a:o.a,qty:o.qty,entryNative:o.entryNative,entryBRL:o.entryBRL,curNative:ff[idx].c,curBRL:cur,
+      resBRL:(cur-o.entryBRL)*o.qty,resPct:(cur/o.entryBRL-1)*100,entryDay:o.entryDay};
+  }).sort((x,y)=>y.resBRL-x.resBRL);
+  const each=banca/per.length; let bhEnd=0,bhCount=0;
+  per.forEach((p,idx)=>{ let sp=null; for(const d of days){ if(d<startDay)continue; const e=p.map.get(d); if(e){sp=e.c;break;} }
+    if(sp){ const q=each/toBRL(sp,p.a.ccy,fxAtDay(startDay)); bhEnd+=q*toBRL(ff[idx].c,p.a.ccy,fxL); bhCount++; }});
+  const bhPct=bhCount?(bhEnd/banca-1)*100:null;
+  const finalEq=eq[eq.length-1][1];
+  const posVal=positions.reduce((s,p)=>s+p.curBRL*p.qty,0);
+  const wins=trades.filter(t=>t.ret>0).length;
+  return {eq,trades,positions,cash,finalEq,posVal,banca,mdd,wins,bhPct,startDay,maxDay,nDays:eq.length,nAssets:per.length};
+}
+
+function pfUniverseAssets(){
+  const v=document.getElementById('pf-uni').value;
+  return ASSETS.filter(a=> v==='all'?true:a.market===v);
+}
+function pfBuildUniverseOptions(){
+  const sel=document.getElementById('pf-uni'); const cur=sel.value;
+  const markets=[...new Set(ASSETS.map(a=>a.market))];
+  sel.innerHTML=`<option value="all">Tudo (${ASSETS.length})</option>`+
+    markets.map(m=>`<option value="${m}">${m} (${ASSETS.filter(a=>a.market===m).length})</option>`).join('');
+  if(cur)sel.value=cur;
+}
+async function doCarteira(){
+  const btn=document.getElementById('pf-run');btn.disabled=true;btn.textContent='…';
+  try{
+    await ensureFallback();
+    const items=[];
+    for(const a of pfUniverseAssets()){
+      let candles=FB.candles&&FB.candles.assets&&FB.candles.assets[a.id];
+      if((!candles||!candles.length)&&a.type==='crypto'){
+        try{const kl=await binanceFetch('/api/v3/klines?symbol='+a.binance+'&interval=1d&limit=500');
+          candles=kl.map(k=>[k[0],+k[1],+k[2],+k[3],+k[4],+k[5]]);}catch(e){}
+      }
+      if(candles&&candles.length) items.push({a,candles});
+    }
+    if(!items.length){ document.getElementById('pf-head').innerHTML='<div class="placeholder">Sem dados pra esse universo (ações precisam do token brapi).</div>'; return; }
+    const r=runPortfolio(items,
+      document.getElementById('pf-strat').value,
+      +document.getElementById('pf-pa').value, +document.getElementById('pf-pb').value,
+      +document.getElementById('pf-banca').value, +document.getElementById('pf-max').value,
+      +document.getElementById('pf-fee').value, +document.getElementById('pf-start').value);
+    if(!r){ document.getElementById('pf-head').innerHTML='<div class="placeholder">Sem resultado pra esses parâmetros.</div>'; return; }
+    renderCarteira(r);
+  }catch(e){ document.getElementById('pf-head').innerHTML=`<div class="placeholder down">Erro: ${e.message}</div>`; }
+  finally{ btn.disabled=false; btn.textContent='▶ Rodar carteira'; }
+}
+function renderCarteira(r){
+  const resTot=r.finalEq-r.banca, resPct=(r.finalEq/r.banca-1)*100;
+  document.getElementById('pf-head').innerHTML=`
+    <div class="s"><span class="k">Banca inicial</span><span class="v num">${fmtBRL(r.banca)}</span></div>
+    <div class="s"><span class="k">Disponível</span><span class="v num">${fmtBRL(r.cash)}</span></div>
+    <div class="s"><span class="k">Em carteira</span><span class="v num">${fmtBRL(r.posVal)}</span></div>
+    <div class="s"><span class="k">Patrimônio</span><span class="v num">${fmtBRL(r.finalEq)}</span></div>
+    <div class="s"><span class="k">Resultado</span><span class="v num ${cls(resTot)}">${fmtBRL(resTot)} · ${fmtPct(resPct)}</span></div>
+    <div class="s"><span class="k">vs B&amp;H cesta</span><span class="v num ${cls(r.bhPct==null?0:resPct-r.bhPct)}">${r.bhPct==null?'—':fmtPct(resPct-r.bhPct)}</span></div>`;
+  document.getElementById('pf-possub').textContent=`· ${r.positions.length} aberta(s) de ${r.nAssets} ativos`;
+  document.querySelector('#pf-pos thead').innerHTML='<tr><th>Ativo</th><th>Sinal</th><th>Px atual</th><th>P.M.</th><th>Qtd</th><th>Result. R$</th><th>Result.%</th></tr>';
+  document.querySelector('#pf-pos tbody').innerHTML=r.positions.map(p=>`<tr>
+    <td><b>${p.a.id}</b> <span class="dim" style="font-size:10px">${p.a.ccy}</span></td>
+    <td><span class="sig up">COMPRADO</span></td>
+    <td class="num">${fmtPrice(p.curNative)}</td>
+    <td class="num">${fmtPrice(p.entryNative)}</td>
+    <td class="num">${p.qty>=1?p.qty.toFixed(2):p.qty.toPrecision(3)}</td>
+    <td class="num ${cls(p.resBRL)}">${fmtBRL(p.resBRL)}</td>
+    <td class="num ${cls(p.resPct)}">${fmtPct(p.resPct)}</td></tr>`).join('')
+    || '<tr><td colspan="7" class="dim" style="text-align:center;padding:14px">Nenhuma posição aberta — tudo em caixa</td></tr>';
+  drawPfEquity(r.eq,r.banca);
+  document.getElementById('pf-stats').innerHTML=`
+    <div class="metric"><span class="k">Trades fechados</span><span class="v num">${r.trades.length}</span></div>
+    <div class="metric"><span class="k">Win rate</span><span class="v num">${r.trades.length?(r.wins/r.trades.length*100).toFixed(0):0}%</span></div>
+    <div class="metric"><span class="k">Drawdown máx</span><span class="v down">${r.mdd.toFixed(1)}%</span></div>
+    <div class="metric"><span class="k">Período</span><span class="v num" style="font-size:11px">${dayToDate(r.startDay)}→${dayToDate(r.maxDay)}</span></div>`;
+  document.getElementById('pf-trsub').textContent=`· ${r.trades.length}`;
+  document.querySelector('#pf-trades tbody').innerHTML=[...r.trades].sort((a,b)=>b.exitDay-a.exitDay).map(t=>`<tr>
+    <td><b>${t.id}</b></td><td>${dayToDate(t.entryDay)}</td><td>${dayToDate(t.exitDay)}</td>
+    <td class="num">${fmtPrice(t.entryNative)}</td><td class="num">${fmtPrice(t.exitNative)}</td>
+    <td class="num ${cls(t.ret)}">${fmtPct(t.ret)}</td></tr>`).join('')
+    || '<tr><td colspan="6" class="dim" style="text-align:center;padding:12px">Nenhum trade fechado</td></tr>';
+}
+function drawPfEquity(eq,banca){
+  const svg=document.getElementById('pf-equity'); const W=600,H=130,pad=4;
+  const vals=eq.map(e=>e[1]); const min=Math.min(...vals,banca),max=Math.max(...vals,banca),rng=max-min||1;
+  const pts=eq.map((e,i)=>{const x=pad+(i/(eq.length-1||1))*(W-2*pad);const y=H-pad-((e[1]-min)/rng)*(H-2*pad);return x.toFixed(1)+','+y.toFixed(1);}).join(' ');
+  const baseY=H-pad-((banca-min)/rng)*(H-2*pad);
+  svg.innerHTML=`<line x1="0" y1="${baseY.toFixed(1)}" x2="${W}" y2="${baseY.toFixed(1)}" stroke="var(--line)" stroke-dasharray="3 3"/>
+    <polyline points="${pts}" fill="none" stroke="var(--txt)" stroke-width="1.2"/>`;
+}
+function onPfStratChange(){
+  const [la,lb,da,db]=STRAT_LABELS[document.getElementById('pf-strat').value];
+  document.getElementById('pf-lbl-a').textContent=la;
+  document.getElementById('pf-lbl-b').textContent=lb;
+  document.getElementById('pf-pa').value=da; document.getElementById('pf-pb').value=db;
+}
+function initCarteira(){
+  pfBuildUniverseOptions(); onPfStratChange();
+  document.getElementById('pf-strat').addEventListener('change',onPfStratChange);
+  document.getElementById('pf-run').addEventListener('click',doCarteira);
+}
+
+/* ============================================================
    NAV / INIT
 ============================================================ */
 let focusIdx=0;
@@ -795,10 +1036,11 @@ function showView(v){
   document.querySelectorAll('.view').forEach(s=>s.classList.toggle('active',s.id==='view-'+v));
   if(v==='backtest'){ loadTV(); updateTVLink(); }
   if(v==='onchain'){ renderOnchain(); }
+  if(v==='carteira'){ pfBuildUniverseOptions(); }
 }
 function initBacktestControls(){
   const sel=document.getElementById('bt-asset');
-  sel.innerHTML=ASSETS.map(a=>`<option value="${a.binance}">${a.id} — ${a.name}</option>`).join('');
+  sel.innerHTML=ASSETS.filter(a=>a.type==='crypto').map(a=>`<option value="${a.binance}">${a.id} — ${a.name}</option>`).join('');
   onStratChange();
   document.getElementById('bt-strat').addEventListener('change',()=>{onStratChange();});
   document.getElementById('bt-asset').addEventListener('change',()=>{loadTV();updateTVLink();});
@@ -812,21 +1054,26 @@ function tick(){
   const d=new Date();
   document.getElementById('clock').textContent=d.toLocaleTimeString('pt-BR');
 }
-function init(){
+async function init(){
   document.querySelectorAll('nav button').forEach(b=>
     b.addEventListener('click',()=>showView(b.dataset.view)));
   document.getElementById('refresh').addEventListener('click',()=>{
     if(document.getElementById('view-painel').classList.contains('active'))renderPainel();
     else if(document.getElementById('view-onchain').classList.contains('active'))renderOnchain();
+    else if(document.getElementById('view-carteira').classList.contains('active'))doCarteira();
   });
   document.addEventListener('keydown',e=>{
     if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;
     if(e.key==='1')showView('painel');
     if(e.key==='2')showView('backtest');
     if(e.key==='3')showView('onchain');
+    if(e.key==='4')showView('carteira');
     if(e.key==='r'||e.key==='R')document.getElementById('refresh').click();
   });
   initBacktestControls();
+  initCarteira();
+  await ensureFallback();          // carrega FX + adiciona ações (se houver) ao universo
+  pfBuildUniverseOptions();
   renderPainel();
   tick(); setInterval(tick,1000);
   setInterval(()=>{if(document.getElementById('view-painel').classList.contains('active'))renderPainel();},60000);
