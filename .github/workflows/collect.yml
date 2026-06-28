@@ -20,6 +20,8 @@ jobs:
         with:
           python-version: '3.11'
       - name: Coletar dados
+        env:
+          BRAPI_TOKEN: ${{ secrets.BRAPI_TOKEN }}   # opcional: liga acoes BR+US se o secret existir
         run: python3 collector/collect.py
       - name: Commitar dados (se mudaram)
         run: |
