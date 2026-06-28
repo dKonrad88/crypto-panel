@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crypto Panel</title>
+<style>
+  :root{
+    --bg:#0e0f11; --panel:#15171a; --panel2:#1b1e22; --line:#262a30;
+    --txt:#d6d9dd; --muted:#8b9097; --dim:#5f656d;
+    --up:#3fb950; --down:#f05d5e; --flat:#8b9097;
+    --accent:#c9a227;
+    --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--txt);
+    font-family:var(--mono);font-size:13px;line-height:1.4}
+  body{padding-bottom:40px}
+  a{color:inherit}
+  .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+  .up{color:var(--up)} .down{color:var(--down)} .flat{color:var(--flat)}
+  .muted{color:var(--muted)} .dim{color:var(--dim)}
+
+  /* topbar */
+  header{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:18px;
+    padding:8px 14px;background:var(--panel);border-bottom:1px solid var(--line)}
+  header .brand{font-weight:600;letter-spacing:.5px;color:var(--txt)}
+  header .brand b{color:var(--accent)}
+  nav{display:flex;gap:4px}
+  nav button{background:transparent;border:1px solid transparent;color:var(--muted);
+    font-family:var(--mono);font-size:12px;padding:4px 10px;cursor:pointer;border-radius:3px}
+  nav button:hover{color:var(--txt);background:var(--panel2)}
+  nav button.active{color:var(--txt);border-color:var(--line);background:var(--panel2)}
+  nav button kbd{color:var(--dim);font-size:10px;margin-right:5px}
+  .spacer{flex:1}
+  .status{display:flex;align-items:center;gap:10px;font-size:11px;color:var(--muted)}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--dim);display:inline-block}
+  .dot.ok{background:var(--up)} .dot.warn{background:var(--accent)} .dot.err{background:var(--down)}
+  .iconbtn{background:transparent;border:1px solid var(--line);color:var(--muted);
+    cursor:pointer;padding:3px 8px;border-radius:3px;font-family:var(--mono)}
+  .iconbtn:hover{color:var(--txt)}
+
+  main{max-width:1200px;margin:0 auto;padding:0 14px}
+  .view{display:none} .view.active{display:block}
+
+  /* ===== PAINEL ===== */
+  .asset{border-bottom:1px solid var(--line);padding:10px 4px}
+  .asset:hover{background:var(--panel)}
+  .a-head{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+  .a-sym{font-size:15px;font-weight:600;width:46px}
+  .a-name{color:var(--dim);font-size:11px;width:70px}
+  .a-price{font-size:15px;width:130px}
+  .chg{width:96px;font-size:12px}
+  .chg .lbl{color:var(--dim);font-size:10px}
+  .a-trend{margin-left:auto;font-size:12px;letter-spacing:.5px}
+  .a-sub{display:flex;gap:22px;flex-wrap:wrap;margin-top:7px;padding-left:2px;
+    font-size:11px;color:var(--muted)}
+  .a-sub b{color:var(--txt);font-weight:500}
+  .tag{border:1px solid var(--line);border-radius:3px;padding:1px 6px;color:var(--muted)}
+  .ok-check{color:var(--up)} .no-check{color:var(--down)}
+
+  /* ===== BACKTEST ===== */
+  .controls{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end;
+    padding:14px 6px;border-bottom:1px solid var(--line)}
+  .ctl{display:flex;flex-direction:column;gap:3px}
+  .ctl label{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px}
+  .ctl select,.ctl input{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    font-family:var(--mono);font-size:12px;padding:5px 7px;border-radius:3px;min-width:70px}
+  .ctl input[type=number]{width:78px}
+  .btn{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    font-family:var(--mono);font-size:12px;padding:6px 14px;cursor:pointer;border-radius:3px}
+  .btn:hover{border-color:var(--muted)}
+  .btn.primary{border-color:var(--accent);color:var(--accent)}
+  .btn.primary:hover{background:rgba(201,162,39,.08)}
+
+  .bt-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:16px 6px}
+  @media(max-width:880px){.bt-grid{grid-template-columns:1fr}}
+  .panelbox{border:1px solid var(--line);border-radius:4px;background:var(--panel)}
+  .panelbox h3{margin:0;padding:8px 12px;font-size:11px;font-weight:600;letter-spacing:.5px;
+    text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line)}
+  .panelbox .body{padding:12px}
+
+  .metrics{display:grid;grid-template-columns:1fr 1fr;gap:10px 18px}
+  .metric{display:flex;justify-content:space-between;border-bottom:1px dotted var(--line);padding-bottom:4px}
+  .metric .k{color:var(--muted);font-size:11px}
+  .metric .v{font-size:13px}
+
+  table.trades{width:100%;border-collapse:collapse;font-size:11px}
+  table.trades th{text-align:right;color:var(--dim);font-weight:500;padding:4px 6px;
+    border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel)}
+  table.trades th:first-child,table.trades td:first-child{text-align:left}
+  table.trades td{text-align:right;padding:3px 6px;border-bottom:1px solid var(--panel2)}
+  .scroll{max-height:280px;overflow:auto}
+
+  #tvchart{height:420px;width:100%}
+  .equity{width:100%;height:130px;display:block}
+  .hint{color:var(--dim);font-size:11px;padding:6px 6px 0}
+  .placeholder{color:var(--dim);padding:30px 12px;text-align:center;font-size:12px}
+
+  /* ===== ON-CHAIN ===== */
+  .oc-asset{border-bottom:1px solid var(--line);padding:12px 4px}
+  .oc-head{display:flex;align-items:baseline;gap:12px}
+  .oc-sym{font-size:14px;font-weight:600;width:46px}
+  .oc-metrics{display:flex;gap:26px;flex-wrap:wrap;margin-top:8px}
+  .oc-m{display:flex;flex-direction:column;gap:2px}
+  .oc-m .k{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.4px}
+  .oc-m .v{font-size:13px}
+  .spark{height:34px;width:160px;display:block}
+  .note{color:var(--dim);font-size:11px;margin-top:4px}
+  .loading{color:var(--dim)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><b>◆</b> CRYPTO PANEL</div>
+  <nav>
+    <button data-view="painel" class="active"><kbd>1</kbd>Painel</button>
+    <button data-view="backtest"><kbd>2</kbd>Backtest</button>
+    <button data-view="onchain"><kbd>3</kbd>On-chain</button>
+  </nav>
+  <div class="spacer"></div>
+  <div class="status">
+    <span><span class="dot" id="srcdot"></span> <span id="srctxt">conectando…</span></span>
+    <span class="num" id="clock">--:--:--</span>
+    <button class="iconbtn" id="refresh" title="Atualizar (R)">↻</button>
+  </div>
+</header>
+
+<main>
+  <!-- PAINEL -->
+  <section class="view active" id="view-painel">
+    <div id="painel"></div>
+    <div class="hint">Preço/indicadores ao vivo via Binance (fallback automático). Verde/vermelho só indicam direção. Setas ↑/↓ trocam o ativo em foco.</div>
+  </section>
+
+  <!-- BACKTEST -->
+  <section class="view" id="view-backtest">
+    <div class="controls">
+      <div class="ctl"><label>Ativo</label>
+        <select id="bt-asset"></select></div>
+      <div class="ctl"><label>Estratégia</label>
+        <select id="bt-strat">
+          <option value="emaCross">Cruzamento EMA</option>
+          <option value="smaCross">Cruzamento SMA</option>
+          <option value="rsi">RSI (reversão)</option>
+          <option value="macd">MACD (cruzamento)</option>
+          <option value="bbBreak">Bollinger (rompimento)</option>
+          <option value="trend200">Tendência &gt; EMA200</option>
+        </select></div>
+      <div class="ctl"><label>Timeframe</label>
+        <select id="bt-tf">
+          <option value="1d" selected>1d</option>
+          <option value="4h">4h</option>
+          <option value="1h">1h</option>
+        </select></div>
+      <div class="ctl" data-p="a"><label id="lbl-pa">EMA rápida</label>
+        <input type="number" id="bt-pa" value="20" min="2" max="400"></div>
+      <div class="ctl" data-p="b"><label id="lbl-pb">EMA lenta</label>
+        <input type="number" id="bt-pb" value="50" min="3" max="400"></div>
+      <div class="ctl"><label>Velas</label>
+        <input type="number" id="bt-limit" value="500" min="60" max="1000"></div>
+      <div class="ctl"><label>Taxa %</label>
+        <input type="number" id="bt-fee" value="0.1" min="0" max="2" step="0.05"></div>
+      <div class="ctl"><label>Capital</label>
+        <input type="number" id="bt-cap" value="10000" min="100" step="100"></div>
+      <button class="btn primary" id="bt-run">▶ Rodar</button>
+      <button class="btn" id="bt-opt" title="Varre uma grade de parâmetros">⊞ Otimizar</button>
+      <a class="btn" id="bt-tvlink" target="_blank" rel="noopener">Abrir no TradingView ↗</a>
+    </div>
+
+    <div class="bt-grid">
+      <div>
+        <div class="panelbox">
+          <h3>Resultado — motor nativo</h3>
+          <div class="body">
+            <div id="bt-metrics"><div class="placeholder">Configure e clique <b>Rodar</b>.</div></div>
+            <svg class="equity" id="bt-equity" viewBox="0 0 600 130" preserveAspectRatio="none"></svg>
+            <div class="hint" id="bt-eqhint"></div>
+          </div>
+        </div>
+        <div class="panelbox" style="margin-top:14px">
+          <h3>Trades</h3>
+          <div class="scroll"><table class="trades" id="bt-trades">
+            <thead><tr><th>#</th><th>Entrada</th><th>Px ent.</th><th>Saída</th><th>Px saí.</th><th>Ret%</th></tr></thead>
+            <tbody></tbody></table></div>
+        </div>
+      </div>
+      <div>
+        <div class="panelbox">
+          <h3>Gráfico TradingView <span class="dim" style="text-transform:none;font-weight:400">— Strategy Tester/Pine ficam no botão "Abrir no TradingView"</span></h3>
+          <div class="body" style="padding:0"><div id="tvchart"></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ON-CHAIN -->
+  <section class="view" id="view-onchain">
+    <div id="onchain"></div>
+    <div class="hint">TVL (e seu histórico) via DefiLlama; on-chain de BTC via mempool.space — tudo grátis e sem chave. Métricas "inteligentes" (netflow de exchange, SOPR, MVRV) são pagas e ficam fora. Gas/validators virão pelo coletor.</div>
+  </section>
+</main>
+
+<script src="https://s3.tradingview.com/tv.js"></script>
+<script>
+/* ============================================================
+   CONFIG
+============================================================ */
+const ASSETS = [
+  {id:'BTC', name:'Bitcoin', binance:'BTCUSDT', tv:'BINANCE:BTCUSDT', llama:'Bitcoin'},
+  {id:'ETH', name:'Ethereum',binance:'ETHUSDT', tv:'BINANCE:ETHUSDT', llama:'Ethereum'},
+  {id:'SOL', name:'Solana',  binance:'SOLUSDT', tv:'BINANCE:SOLUSDT', llama:'Solana'},
+  {id:'BNB', name:'BNB',     binance:'BNBUSDT', tv:'BINANCE:BNBUSDT', llama:'BSC'},
+  {id:'XRP', name:'XRP',     binance:'XRPUSDT', tv:'BINANCE:XRPUSDT', llama:'XRPL'},
+  {id:'SUI', name:'Sui',     binance:'SUIUSDT', tv:'BINANCE:SUIUSDT', llama:'Sui'},
+];
+const BINANCE_HOSTS = ['https://api.binance.com','https://data-api.binance.vision'];
+
+/* ============================================================
+   FETCH helpers (com fallback de host)
+============================================================ */
+let SRC_STATE = 'init';
+function setSrc(state, txt){
+  SRC_STATE = state;
+  const dot = document.getElementById('srcdot'), t = document.getElementById('srctxt');
+  dot.className = 'dot ' + (state==='ok'?'ok':state==='warn'?'warn':state==='err'?'err':'');
+  t.textContent = txt;
+}
+async function binanceFetch(path){
+  let lastErr;
+  for(const host of BINANCE_HOSTS){
+    try{
+      const r = await fetch(host+path, {cache:'no-store'});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      return await r.json();
+    }catch(e){ lastErr = e; }
+  }
+  throw lastErr;
+}
+async function getJSON(url){
+  const r = await fetch(url,{cache:'no-store'});
+  if(!r.ok) throw new Error('HTTP '+r.status);
+  return r.json();
+}
+
+/* ============================================================
+   INDICADORES
+============================================================ */
+function sma(v,p){const o=Array(v.length).fill(null);let s=0;
+  for(let i=0;i<v.length;i++){s+=v[i];if(i>=p)s-=v[i-p];if(i>=p-1)o[i]=s/p;}return o;}
+function ema(v,p){const o=Array(v.length).fill(null);const k=2/(p+1);let prev=null;
+  for(let i=0;i<v.length;i++){if(v[i]==null){o[i]=null;continue;}
+    if(prev==null){ // semente = SMA dos primeiros p
+      if(i>=p-1){let s=0;for(let j=i-p+1;j<=i;j++)s+=v[j];prev=s/p;o[i]=prev;}
+    }else{prev=v[i]*k+prev*(1-k);o[i]=prev;}}return o;}
+function rsi(c,p=14){const o=Array(c.length).fill(null);let g=0,l=0;
+  for(let i=1;i<c.length;i++){const d=c[i]-c[i-1];const up=Math.max(d,0),dn=Math.max(-d,0);
+    if(i<=p){g+=up;l+=dn;if(i===p){g/=p;l/=p;o[i]=l===0?100:100-100/(1+g/l);}}
+    else{g=(g*(p-1)+up)/p;l=(l*(p-1)+dn)/p;o[i]=l===0?100:100-100/(1+g/l);}}return o;}
+function macd(c,f=12,s=26,sig=9){const ef=ema(c,f),es=ema(c,s);
+  const line=c.map((_,i)=>ef[i]!=null&&es[i]!=null?ef[i]-es[i]:null);
+  const valid=line.map(x=>x==null?null:x);
+  const signal=ema(valid.map(x=>x==null?0:x),sig).map((x,i)=>line[i]==null?null:x);
+  const hist=line.map((x,i)=>x!=null&&signal[i]!=null?x-signal[i]:null);
+  return {line,signal,hist};}
+function stdev(v,p){const o=Array(v.length).fill(null);
+  for(let i=p-1;i<v.length;i++){let m=0;for(let j=i-p+1;j<=i;j++)m+=v[j];m/=p;
+    let s=0;for(let j=i-p+1;j<=i;j++)s+=(v[j]-m)**2;o[i]=Math.sqrt(s/p);}return o;}
+function atr(h,l,c,p=14){const tr=Array(c.length).fill(null);
+  for(let i=0;i<c.length;i++){if(i===0){tr[i]=h[i]-l[i];continue;}
+    tr[i]=Math.max(h[i]-l[i],Math.abs(h[i]-c[i-1]),Math.abs(l[i]-c[i-1]));}
+  const o=Array(c.length).fill(null);let prev=null;
+  for(let i=0;i<c.length;i++){if(i<p)continue;
+    if(prev==null){let s=0;for(let j=1;j<=p;j++)s+=tr[j];prev=s/p;}
+    else prev=(prev*(p-1)+tr[i])/p;o[i]=prev;}return o;}
+
+/* ============================================================
+   FORMATAÇÃO
+============================================================ */
+const nf = new Intl.NumberFormat('pt-BR');
+function fmtPrice(x){
+  if(x==null||isNaN(x))return '—';
+  const d = x>=10?2 : 4;
+  return x.toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d});
+}
+function fmtPct(x){if(x==null||isNaN(x))return '—';return (x>=0?'+':'')+x.toFixed(2)+'%';}
+function cls(x){return x>0?'up':x<0?'down':'flat';}
+function fmtBig(x){if(x==null||isNaN(x))return '—';
+  if(x>=1e9)return (x/1e9).toFixed(2)+'B';
+  if(x>=1e6)return (x/1e6).toFixed(2)+'M';
+  if(x>=1e3)return (x/1e3).toFixed(2)+'K';return nf.format(Math.round(x));}
+
+/* ============================================================
+   PAINEL
+============================================================ */
+function trendShort(price,e20,e50,hist){
+  if(e20==null||e50==null)return {t:'—',c:'flat',a:'·'};
+  if(price>e20&&e20>e50&&hist>0)return {t:'Alta',c:'up',a:'▲'};
+  if(price<e20&&e20<e50&&hist<0)return {t:'Baixa',c:'down',a:'▼'};
+  return {t:'Lateral',c:'flat',a:'▬'};
+}
+function trendMed(price,e50,e200){
+  if(e50==null||e200==null)return {t:'—',c:'flat',a:'·'};
+  if(price>e50&&e50>e200)return {t:'Alta',c:'up',a:'▲'};
+  if(price<e50&&e50<e200)return {t:'Baixa',c:'down',a:'▼'};
+  return {t:'Lateral',c:'flat',a:'▬'};
+}
+
+async function loadAsset(a){
+  // ticker 24h + candles diários
+  const [tk, kl] = await Promise.all([
+    binanceFetch('/api/v3/ticker/24hr?symbol='+a.binance),
+    binanceFetch('/api/v3/klines?symbol='+a.binance+'&interval=1d&limit=400'),
+  ]);
+  const close = kl.map(k=>+k[4]);
+  const vol = kl.map(k=>+k[5]);
+  const price = +tk.lastPrice;
+  const ch24 = +tk.priceChangePercent;
+  const n = close.length;
+  const ch7 = n>8 ? (close[n-1]/close[n-8]-1)*100 : null;
+  const ch30 = n>31 ? (close[n-1]/close[n-31]-1)*100 : null;
+  const e20=ema(close,20),e50=ema(close,50),e200=ema(close,200);
+  const r=rsi(close,14),m=macd(close);
+  const i=n-1;
+  const j=n-2; // última vela FECHADA (a última é o dia em andamento → volume parcial)
+  const volAvg = sma(vol,20)[j];
+  return {a, price, ch24, ch7, ch30,
+    e20:e20[i], e50:e50[i], e200:e200[i],
+    rsi:r[i], macdHist:m.hist[i], vol:vol[j], volRatio: volAvg?vol[j]/volAvg:null};
+}
+
+function renderAssetRow(d){
+  const a=d.a;
+  const ts=trendShort(d.price,d.e20,d.e50,d.macdHist);
+  const tm=trendMed(d.price,d.e50,d.e200);
+  const stackOk = d.e20>d.e50 && d.e50>d.e200;
+  const macdSign = d.macdHist==null?'—':(d.macdHist>0?'+':'−');
+  return `<div class="asset" data-id="${a.id}">
+    <div class="a-head">
+      <span class="a-sym">${a.id}</span>
+      <span class="a-name">${a.name}</span>
+      <span class="a-price num">${fmtPrice(d.price)} <span class="dim" style="font-size:10px">USDT</span></span>
+      <span class="chg num"><span class="lbl">24h </span><span class="${cls(d.ch24)}">${fmtPct(d.ch24)}</span></span>
+      <span class="chg num"><span class="lbl">7d </span><span class="${cls(d.ch7)}">${fmtPct(d.ch7)}</span></span>
+      <span class="chg num"><span class="lbl">30d </span><span class="${cls(d.ch30)}">${fmtPct(d.ch30)}</span></span>
+      <span class="a-trend ${tm.c}">${tm.a} ${tm.t.toUpperCase()}</span>
+    </div>
+    <div class="a-sub">
+      <span class="tag">EMA 20/50/200 <b class="${stackOk?'ok-check':'no-check'}">${stackOk?'alinhada ✓':'cruzada'}</b></span>
+      <span>RSI <b class="num">${d.rsi==null?'—':d.rsi.toFixed(0)}</b></span>
+      <span>MACD <b class="${d.macdHist>0?'up':d.macdHist<0?'down':''}">${macdSign}</b></span>
+      <span>Vol <b class="num">${d.volRatio==null?'—':d.volRatio.toFixed(2)+'×'}</b> méd</span>
+      <span>Curto <b class="${ts.c}">${ts.a} ${ts.t}</b></span>
+      <span class="oc-teaser dim" data-id="${a.id}">on-chain…</span>
+    </div>
+  </div>`;
+}
+
+async function renderPainel(){
+  const host=document.getElementById('painel');
+  host.innerHTML = ASSETS.map(a=>`<div class="asset"><div class="a-head">
+    <span class="a-sym">${a.id}</span><span class="loading">carregando…</span></div></div>`).join('');
+  setSrc('warn','carregando…');
+  let okCount=0;
+  const rows = await Promise.all(ASSETS.map(async a=>{
+    try{const d=await loadAsset(a);okCount++;return renderAssetRow(d);}
+    catch(e){return `<div class="asset"><div class="a-head">
+      <span class="a-sym">${a.id}</span><span class="down">indisponível (${e.message})</span></div></div>`;}
+  }));
+  host.innerHTML = rows.join('');
+  setSrc(okCount===ASSETS.length?'ok':okCount?'warn':'err',
+    okCount===ASSETS.length?'Binance · ao vivo':okCount?`parcial (${okCount}/${ASSETS.length})`:'Binance indisponível');
+  loadOnchainTeasers();
+}
+
+/* on-chain compacto no painel (assíncrono, preenche depois) */
+async function loadOnchainTeasers(){
+  // BTC via mempool.space
+  try{
+    const [hr,fees]=await Promise.all([
+      getJSON('https://mempool.space/api/v1/mining/hashrate/3d'),
+      getJSON('https://mempool.space/api/v1/fees/recommended'),
+    ]);
+    const eh=(hr.currentHashrate/1e18).toFixed(0);
+    setTeaser('BTC',`Hash <b>${eh} EH/s</b> · Fee <b>${fees.halfHourFee} sat/vB</b>`);
+  }catch(e){setTeaser('BTC','on-chain n/d');}
+  // demais via DefiLlama TVL
+  for(const a of ASSETS){
+    if(a.id==='BTC')continue;
+    try{
+      const s=await getJSON('https://api.llama.fi/v2/historicalChainTvl/'+a.llama);
+      const tvl=s[s.length-1].tvl;
+      setTeaser(a.id,`TVL <b>$${fmtBig(tvl)}</b>`);
+    }catch(e){setTeaser(a.id,'TVL n/d');}
+  }
+}
+function setTeaser(id,html){
+  document.querySelectorAll('.oc-teaser[data-id="'+id+'"]').forEach(el=>{
+    el.classList.remove('dim');el.innerHTML='⛓ '+html;});
+}
+
+/* ============================================================
+   BACKTEST
+============================================================ */
+const STRAT_LABELS = {
+  emaCross:['EMA rápida','EMA lenta',20,50],
+  smaCross:['SMA rápida','SMA lenta',20,50],
+  rsi:['RSI período','Sobrevenda/compra',14,30],
+  macd:['MACD rápida','MACD lenta',12,26],
+  bbBreak:['BB período','BB desvios',20,2],
+  trend200:['EMA tendência','(não usado)',200,0],
+};
+function strategyPositions(strat,k,pa,pb){
+  const c=k.map(x=>+x[4]);
+  const n=c.length; const pos=Array(n).fill(0);
+  if(strat==='emaCross'||strat==='smaCross'){
+    const f=(strat==='emaCross'?ema:sma)(c,pa), s=(strat==='emaCross'?ema:sma)(c,pb);
+    for(let i=0;i<n;i++) pos[i]=(f[i]!=null&&s[i]!=null&&f[i]>s[i])?1:0;
+  }else if(strat==='trend200'){
+    const e=ema(c,pa);
+    for(let i=0;i<n;i++) pos[i]=(e[i]!=null&&c[i]>e[i])?1:0;
+  }else if(strat==='macd'){
+    const m=macd(c,pa,pb,9);
+    for(let i=0;i<n;i++) pos[i]=(m.line[i]!=null&&m.signal[i]!=null&&m.line[i]>m.signal[i])?1:0;
+  }else if(strat==='rsi'){
+    const r=rsi(c,pa); const lo=pb, hi=100-pb; let p=0;
+    for(let i=0;i<n;i++){if(r[i]!=null){if(p===0&&r[i]<lo)p=1;else if(p===1&&r[i]>hi)p=0;}pos[i]=p;}
+  }else if(strat==='bbBreak'){
+    const b=sma(c,pa), sd=stdev(c,pa); let p=0;
+    for(let i=0;i<n;i++){if(b[i]!=null){const up=b[i]+pb*sd[i];
+      if(p===0&&c[i]>up)p=1;else if(p===1&&c[i]<b[i])p=0;}pos[i]=p;}
+  }
+  return pos;
+}
+function runBacktest(k,strat,pa,pb,feePct,cap){
+  const c=k.map(x=>+x[4]); const t=k.map(x=>x[0]);
+  const pos=strategyPositions(strat,k,pa,pb);
+  const fee=feePct/100;
+  // primeiro índice com sinal válido (depois do aquecimento dos indicadores)
+  let start=0; while(start<pos.length && pos[start]===0 && c[start]!=null) start++; // não usado p/ b&h
+  let cash=cap, units=0, inPos=false, entryPx=0, entryI=0;
+  const trades=[]; const equity=[];
+  for(let i=0;i<c.length;i++){
+    if(!inPos && pos[i]===1){ // entra
+      units=(cash*(1-fee))/c[i]; cash=0; inPos=true; entryPx=c[i]; entryI=i;
+    }else if(inPos && pos[i]===0){ // sai
+      cash=units*c[i]*(1-fee); const ret=(c[i]/entryPx-1)*100;
+      trades.push({i0:entryI,i1:i,px0:entryPx,px1:c[i],ret,t0:t[entryI],t1:t[i],open:false});
+      units=0; inPos=false;
+    }
+    equity.push(cash+units*c[i]);
+  }
+  if(inPos){const i=c.length-1;const ret=(c[i]/entryPx-1)*100;
+    trades.push({i0:entryI,i1:i,px0:entryPx,px1:c[i],ret,t0:t[entryI],t1:t[i],open:true});}
+  // métricas
+  const finalEq=equity[equity.length-1];
+  const totalRet=(finalEq/cap-1)*100;
+  // buy & hold no mesmo período (da 1ª vela utilizável)
+  const bhStart=c.findIndex(x=>x!=null);
+  const bh=(c[c.length-1]/c[bhStart]-1)*100;
+  // drawdown
+  let peak=-Infinity,mdd=0;
+  for(const e of equity){if(e>peak)peak=e;const dd=(e/peak-1)*100;if(dd<mdd)mdd=dd;}
+  // sharpe (retornos por vela)
+  const rets=[];for(let i=1;i<equity.length;i++)rets.push(equity[i]/equity[i-1]-1);
+  const mean=rets.reduce((a,b)=>a+b,0)/(rets.length||1);
+  const sd=Math.sqrt(rets.reduce((a,b)=>a+(b-mean)**2,0)/(rets.length||1));
+  const ann={'1d':365,'4h':2190,'1h':8760}[document.getElementById('bt-tf').value]||365;
+  const sharpe=sd>0?(mean/sd)*Math.sqrt(ann):0;
+  const wins=trades.filter(t=>t.ret>0).length;
+  const winRate=trades.length?wins/trades.length*100:0;
+  const avg=trades.length?trades.reduce((a,b)=>a+b.ret,0)/trades.length:0;
+  const exposure=pos.filter(x=>x===1).length/pos.length*100;
+  return {trades,equity,totalRet,bh,mdd,sharpe,winRate,avg,exposure,finalEq,n:c.length};
+}
+
+let BT_KLINES=null, BT_KEY='';
+async function ensureKlines(){
+  const sym=document.getElementById('bt-asset').value;
+  const tf=document.getElementById('bt-tf').value;
+  const lim=+document.getElementById('bt-limit').value;
+  const key=sym+tf+lim;
+  if(key!==BT_KEY){
+    BT_KLINES=await binanceFetch(`/api/v3/klines?symbol=${sym}&interval=${tf}&limit=${lim}`);
+    BT_KEY=key;
+  }
+  return BT_KLINES;
+}
+async function doBacktest(){
+  const btn=document.getElementById('bt-run');btn.textContent='…';btn.disabled=true;
+  try{
+    const k=await ensureKlines();
+    const strat=document.getElementById('bt-strat').value;
+    const pa=+document.getElementById('bt-pa').value;
+    const pb=+document.getElementById('bt-pb').value;
+    const fee=+document.getElementById('bt-fee').value;
+    const cap=+document.getElementById('bt-cap').value;
+    const r=runBacktest(k,strat,pa,pb,fee,cap);
+    renderBtResult(r,cap);
+  }catch(e){
+    document.getElementById('bt-metrics').innerHTML=`<div class="placeholder down">Erro: ${e.message}</div>`;
+  }finally{btn.textContent='▶ Rodar';btn.disabled=false;}
+}
+function renderBtResult(r,cap){
+  const vsBH=r.totalRet-r.bh;
+  document.getElementById('bt-metrics').innerHTML=`<div class="metrics">
+    <div class="metric"><span class="k">Retorno</span><span class="v ${cls(r.totalRet)}">${fmtPct(r.totalRet)}</span></div>
+    <div class="metric"><span class="k">Buy &amp; Hold</span><span class="v ${cls(r.bh)}">${fmtPct(r.bh)}</span></div>
+    <div class="metric"><span class="k">vs B&amp;H</span><span class="v ${cls(vsBH)}">${fmtPct(vsBH)}</span></div>
+    <div class="metric"><span class="k">Trades</span><span class="v num">${r.trades.length}</span></div>
+    <div class="metric"><span class="k">Win rate</span><span class="v num">${r.winRate.toFixed(0)}%</span></div>
+    <div class="metric"><span class="k">Trade médio</span><span class="v ${cls(r.avg)}">${fmtPct(r.avg)}</span></div>
+    <div class="metric"><span class="k">Drawdown máx</span><span class="v down">${r.mdd.toFixed(1)}%</span></div>
+    <div class="metric"><span class="k">Sharpe</span><span class="v num">${r.sharpe.toFixed(2)}</span></div>
+    <div class="metric"><span class="k">Exposição</span><span class="v num">${r.exposure.toFixed(0)}%</span></div>
+    <div class="metric"><span class="k">Capital final</span><span class="v num">${fmtBig(r.finalEq)}</span></div>
+  </div>`;
+  drawEquity(r.equity,cap);
+  const tb=document.querySelector('#bt-trades tbody');
+  tb.innerHTML=r.trades.map((t,i)=>`<tr>
+    <td>${i+1}</td>
+    <td>${new Date(t.t0).toLocaleDateString('pt-BR')}</td>
+    <td class="num">${fmtPrice(t.px0)}</td>
+    <td>${t.open?'<span class="muted">aberto</span>':new Date(t.t1).toLocaleDateString('pt-BR')}</td>
+    <td class="num">${fmtPrice(t.px1)}</td>
+    <td class="num ${cls(t.ret)}">${fmtPct(t.ret)}</td></tr>`).join('')
+    || `<tr><td colspan="6" class="dim" style="text-align:center;padding:12px">Nenhum trade gerado</td></tr>`;
+  document.getElementById('bt-eqhint').textContent=
+    `Curva de capital · ${r.n} velas · entrada/saída no fechamento da vela do sinal (sem look-ahead de tick).`;
+}
+function drawEquity(eq,cap){
+  const svg=document.getElementById('bt-equity');
+  const W=600,H=130,pad=4;
+  const min=Math.min(...eq),max=Math.max(...eq);
+  const rng=max-min||1;
+  const pts=eq.map((e,i)=>{const x=pad+(i/(eq.length-1))*(W-2*pad);
+    const y=H-pad-((e-min)/rng)*(H-2*pad);return x.toFixed(1)+','+y.toFixed(1);}).join(' ');
+  const baseY=H-pad-((cap-min)/rng)*(H-2*pad);
+  svg.innerHTML=`<line x1="0" y1="${baseY.toFixed(1)}" x2="${W}" y2="${baseY.toFixed(1)}"
+      stroke="var(--line)" stroke-dasharray="3 3"/>
+    <polyline points="${pts}" fill="none" stroke="var(--txt)" stroke-width="1.2"/>`;
+}
+
+/* otimização: varre grade pequena de (pa,pb) e ranqueia por retorno */
+async function doOptimize(){
+  const btn=document.getElementById('bt-opt');btn.textContent='varrendo…';btn.disabled=true;
+  try{
+    const k=await ensureKlines();
+    const strat=document.getElementById('bt-strat').value;
+    const fee=+document.getElementById('bt-fee').value;
+    const cap=+document.getElementById('bt-cap').value;
+    let grid=[];
+    if(strat==='rsi'){ for(let p=7;p<=21;p+=7)for(let th=20;th<=35;th+=5)grid.push([p,th]); }
+    else if(strat==='bbBreak'){ for(let p=10;p<=30;p+=5)for(let d=1.5;d<=3;d+=0.5)grid.push([p,d]); }
+    else if(strat==='trend200'){ for(let p=100;p<=250;p+=25)grid.push([p,0]); }
+    else { for(let a=10;a<=40;a+=5)for(let b=a+10;b<=120;b+=15)grid.push([a,b]); }
+    let best=null;
+    for(const [pa,pb] of grid){
+      const r=runBacktest(k,strat,pa,pb,fee,cap);
+      if(!best||r.totalRet>best.r.totalRet)best={pa,pb,r};
+    }
+    if(best){
+      document.getElementById('bt-pa').value=best.pa;
+      document.getElementById('bt-pb').value=best.pb;
+      renderBtResult(best.r,cap);
+      document.getElementById('bt-eqhint').textContent=
+        `Melhor de ${grid.length} combinações · params ${best.pa}/${best.pb} · retorno ${fmtPct(best.r.totalRet)}.`;
+    }
+  }catch(e){alert('Erro na otimização: '+e.message);}
+  finally{btn.textContent='⊞ Otimizar';btn.disabled=false;}
+}
+
+/* TradingView widget */
+let tvWidget=null;
+function loadTV(){
+  const sym=ASSETS.find(a=>a.binance===document.getElementById('bt-asset').value).tv;
+  const tfmap={'1d':'D','4h':'240','1h':'60'};
+  const tf=tfmap[document.getElementById('bt-tf').value]||'D';
+  document.getElementById('tvchart').innerHTML='';
+  if(typeof TradingView==='undefined')return;
+  tvWidget=new TradingView.widget({
+    container_id:'tvchart',symbol:sym,interval:tf,autosize:true,
+    theme:'dark',style:'1',locale:'br',timezone:'America/Sao_Paulo',
+    hide_side_toolbar:true,allow_symbol_change:false,
+    studies:['RSI@tv-basicstudies','MACD@tv-basicstudies'],
+  });
+}
+function updateTVLink(){
+  const sym=ASSETS.find(a=>a.binance===document.getElementById('bt-asset').value).tv;
+  document.getElementById('bt-tvlink').href='https://www.tradingview.com/chart/?symbol='+encodeURIComponent(sym);
+}
+function onStratChange(){
+  const [la,lb,da,db]=STRAT_LABELS[document.getElementById('bt-strat').value];
+  document.getElementById('lbl-pa').textContent=la;
+  document.getElementById('lbl-pb').textContent=lb;
+  document.getElementById('bt-pa').value=da;
+  document.getElementById('bt-pb').value=db;
+  document.querySelector('[data-p="b"]').style.opacity=(lb.includes('não usado')?0.35:1);
+}
+
+/* ============================================================
+   ON-CHAIN (tela dedicada)
+============================================================ */
+async function renderOnchain(){
+  const host=document.getElementById('onchain');
+  host.innerHTML=ASSETS.map(a=>`<div class="oc-asset" id="oc-${a.id}">
+    <div class="oc-head"><span class="oc-sym">${a.id}</span><span class="loading">carregando on-chain…</span></div>
+  </div>`).join('');
+  // BTC
+  renderOcBTC();
+  // chains com TVL
+  for(const a of ASSETS){ if(a.id!=='BTC') renderOcChain(a); }
+}
+async function renderOcBTC(){
+  const box=document.getElementById('oc-BTC');
+  try{
+    const [hr,fees,mp]=await Promise.all([
+      getJSON('https://mempool.space/api/v1/mining/hashrate/3d'),
+      getJSON('https://mempool.space/api/v1/fees/recommended'),
+      getJSON('https://mempool.space/api/mempool'),
+    ]);
+    box.innerHTML=`<div class="oc-head"><span class="oc-sym">BTC</span><span class="muted">Bitcoin · mempool.space</span></div>
+      <div class="oc-metrics">
+        <div class="oc-m"><span class="k">Hashrate</span><span class="v num">${(hr.currentHashrate/1e18).toFixed(1)} EH/s</span></div>
+        <div class="oc-m"><span class="k">Dificuldade</span><span class="v num">${fmtBig(hr.currentDifficulty)}</span></div>
+        <div class="oc-m"><span class="k">Fee (30min)</span><span class="v num">${fees.halfHourFee} sat/vB</span></div>
+        <div class="oc-m"><span class="k">Fee (rápida)</span><span class="v num">${fees.fastestFee} sat/vB</span></div>
+        <div class="oc-m"><span class="k">Mempool</span><span class="v num">${mp.count?nf.format(mp.count):'—'} tx</span></div>
+      </div>
+      <div class="note">Supply, endereços ativos e netflow de exchange: virão pelo coletor / são pagos.</div>`;
+  }catch(e){ box.innerHTML=`<div class="oc-head"><span class="oc-sym">BTC</span><span class="down">on-chain indisponível (${e.message})</span></div>`; }
+}
+async function renderOcChain(a){
+  const box=document.getElementById('oc-'+a.id);
+  try{
+    const s=await getJSON('https://api.llama.fi/v2/historicalChainTvl/'+a.llama);
+    if(!Array.isArray(s)||!s.length) throw new Error('sem dados');
+    const cur=s[s.length-1].tvl;
+    const ago30=s.length>30?s[s.length-31].tvl:null;
+    const chg=ago30?(cur/ago30-1)*100:null;
+    box.innerHTML=`<div class="oc-head"><span class="oc-sym">${a.id}</span><span class="muted">${a.name} · DefiLlama TVL</span></div>
+      <div class="oc-metrics">
+        <div class="oc-m"><span class="k">TVL atual</span><span class="v num">$${fmtBig(cur)}</span></div>
+        <div class="oc-m"><span class="k">TVL 30d</span><span class="v ${cls(chg)}">${fmtPct(chg)}</span></div>
+        <div class="oc-m"><span class="k">Histórico (1a)</span>${sparkSVG(s.slice(-365).map(x=>x.tvl))}</div>
+      </div>
+      <div class="note">${a.id==='SUI'||a.id==='XRP'?'Cobertura on-chain mais magra para este ativo — TVL é o que há de confiável e grátis.':'Gas/validators/staking entram pelo coletor.'}</div>`;
+  }catch(e){
+    box.innerHTML=`<div class="oc-head"><span class="oc-sym">${a.id}</span><span class="muted">${a.name}</span></div>
+      <div class="note down">TVL indisponível na DefiLlama para "${a.llama}" (${e.message}). On-chain deste ativo é limitado e grátis — ajustaremos a fonte.</div>`;
+  }
+}
+function sparkSVG(vals){
+  vals=vals.filter(v=>v!=null);if(vals.length<2)return '<span class="dim">—</span>';
+  const W=160,H=34,p=2;const min=Math.min(...vals),max=Math.max(...vals),rng=max-min||1;
+  const pts=vals.map((v,i)=>{const x=p+(i/(vals.length-1))*(W-2*p);
+    const y=H-p-((v-min)/rng)*(H-2*p);return x.toFixed(1)+','+y.toFixed(1);}).join(' ');
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+    <polyline points="${pts}" fill="none" stroke="var(--muted)" stroke-width="1"/></svg>`;
+}
+
+/* ============================================================
+   NAV / INIT
+============================================================ */
+let focusIdx=0;
+function showView(v){
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
+  document.querySelectorAll('.view').forEach(s=>s.classList.toggle('active',s.id==='view-'+v));
+  if(v==='backtest'){ loadTV(); updateTVLink(); }
+  if(v==='onchain'){ renderOnchain(); }
+}
+function initBacktestControls(){
+  const sel=document.getElementById('bt-asset');
+  sel.innerHTML=ASSETS.map(a=>`<option value="${a.binance}">${a.id} — ${a.name}</option>`).join('');
+  onStratChange();
+  document.getElementById('bt-strat').addEventListener('change',()=>{onStratChange();});
+  document.getElementById('bt-asset').addEventListener('change',()=>{loadTV();updateTVLink();});
+  document.getElementById('bt-tf').addEventListener('change',()=>{loadTV();});
+  document.getElementById('bt-run').addEventListener('click',doBacktest);
+  document.getElementById('bt-opt').addEventListener('click',doOptimize);
+  updateTVLink();
+}
+function tick(){
+  const d=new Date();
+  document.getElementById('clock').textContent=d.toLocaleTimeString('pt-BR');
+}
+function init(){
+  document.querySelectorAll('nav button').forEach(b=>
+    b.addEventListener('click',()=>showView(b.dataset.view)));
+  document.getElementById('refresh').addEventListener('click',()=>{
+    if(document.getElementById('view-painel').classList.contains('active'))renderPainel();
+    else if(document.getElementById('view-onchain').classList.contains('active'))renderOnchain();
+  });
+  document.addEventListener('keydown',e=>{
+    if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;
+    if(e.key==='1')showView('painel');
+    if(e.key==='2')showView('backtest');
+    if(e.key==='3')showView('onchain');
+    if(e.key==='r'||e.key==='R')document.getElementById('refresh').click();
+  });
+  initBacktestControls();
+  renderPainel();
+  tick(); setInterval(tick,1000);
+  setInterval(()=>{if(document.getElementById('view-painel').classList.contains('active'))renderPainel();},60000);
+}
+init();
+</script>
+</body>
+</html>
