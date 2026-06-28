@@ -126,6 +126,7 @@
     <button data-view="backtest"><kbd>2</kbd>Backtest</button>
     <button data-view="onchain"><kbd>3</kbd>On-chain</button>
     <button data-view="carteira"><kbd>4</kbd>Carteira</button>
+    <button data-view="sinais"><kbd>5</kbd>Sinais</button>
   </nav>
   <div class="spacer"></div>
   <div class="status">
@@ -283,6 +284,12 @@
         <thead><tr><th>Ativo</th><th>Entrada</th><th>Saída</th><th>Px ent.</th><th>Px saí.</th><th>Ret%</th></tr></thead><tbody></tbody></table></div>
     </div>
     <div class="hint">Mesmo motor pros dois usos — início no passado: "como teria ido"; início "desde hoje": robô paper que evolui com os preços que chegam (recalcula a cada atualização). Banca em R$ (cripto/US convertidos por USD-BRL). Alocação: banca ÷ máx posições por sinal de compra. <b>Simulação — sem ordem real.</b></div>
+  </section>
+
+  <!-- SINAIS -->
+  <section class="view" id="view-sinais">
+    <div id="sinais"></div>
+    <div class="hint">Leitura técnica das 6 criptos (SPOT): tendência curto/médio + força, sinal de entrada com o motivo, e a <b>regra que melhor funcionou no histórico de cada moeda</b> (acerto %) com o que ela diz agora. Sinais são <b>leitura do passado, não previsão</b> — não garantem o futuro, e a decisão de entrar é sua.</div>
   </section>
 </main>
 
@@ -1028,6 +1035,84 @@ function initCarteira(){
 }
 
 /* ============================================================
+   SINAIS (análise + sinal de entrada, SPOT) — robô que "aprende" por moeda
+============================================================ */
+const STRAT_NAME={emaCross:'Cruz. EMA',smaCross:'Cruz. SMA',rsi:'RSI',macd:'MACD',bbBreak:'Bollinger',trend200:'Tend.>EMA200'};
+async function getCandles(a){
+  if(a.type==='crypto'){
+    try{ return await binanceFetch('/api/v3/klines?symbol='+a.binance+'&interval=1d&limit=400'); }catch(e){}
+  }
+  await ensureFallback();
+  const arr=FB.candles&&FB.candles.assets&&FB.candles.assets[a.id];
+  return arr&&arr.length?arr:null;
+}
+function analyzeSinais(a,kl){
+  const c=kl.map(k=>+k[4]); const n=c.length, i=n-1;
+  const e20=ema(c,20),e50=ema(c,50),e200=ema(c,200),r=rsi(c,14),m=macd(c);
+  const price=c[i];
+  const med=(price>e50[i]&&e50[i]>e200[i])?'alta':(price<e50[i]&&e50[i]<e200[i])?'queda':'lateral';
+  const cur=(price>e20[i]&&e20[i]>e50[i]&&m.hist[i]>0)?'alta':(price<e20[i]&&e20[i]<e50[i]&&m.hist[i]<0)?'queda':'lateral';
+  const conf=[price>e20[i], e20[i]>e50[i], e50[i]>e200[i], price>e200[i], m.hist[i]>0, r[i]>50, e50[i]>e50[i-5]];
+  const forca=Math.round(conf.filter(Boolean).length/conf.length*100);
+  const macdUp=(m.hist[i-1]<=0&&m.hist[i]>0)||(m.hist[i-2]<=0&&m.hist[i-1]>0);
+  const macdDn=(m.hist[i-1]>=0&&m.hist[i]<0)||(m.hist[i-2]>=0&&m.hist[i-1]<0);
+  const rsiUp=(r[i-1]<35&&r[i]>=35)||(r[i-2]<35&&r[i-1]>=35);
+  const upE50=(c[i-1]<=e50[i-1]&&c[i]>e50[i])||(c[i-2]<=e50[i-2]&&c[i-1]>e50[i-1]);
+  const dnE50=(c[i-1]>=e50[i-1]&&c[i]<e50[i])||(c[i-2]>=e50[i-2]&&c[i-1]<e50[i-1]);
+  const buyTrig=macdUp||rsiUp||upE50, sellTrig=macdDn||dnE50;
+  let sinal,motivo,sc;
+  if(med==='queda'){ sinal='fora'; motivo='tendência de baixa no médio prazo — evitar entrada'; sc='down'; }
+  else if(sellTrig){ sinal='sair'; motivo=macdDn?'MACD virou pra baixo':'preço perdeu a média de 50'; sc='down'; }
+  else if(buyTrig){ sinal='comprar'; motivo=(rsiUp?'RSI saindo de sobrevenda':macdUp?'MACD virou pra cima':'preço recuperou a média de 50')+(med==='alta'?' + tendência de alta':''); sc='up'; }
+  else { sinal='aguardar'; motivo=med==='alta'?'tendência de alta, mas sem gatilho de entrada agora':'lateral — esperar definição'; sc='flat'; }
+  const cands=[['emaCross',10,30],['emaCross',20,50],['emaCross',50,200],['rsi',14,30],['rsi',14,35],['macd',12,26],['trend200',200,0],['bbBreak',20,2]];
+  let best=null;
+  for(const [s,pa,pb] of cands){ const bt=runBacktest(kl,s,pa,pb,0.1,1000);
+    if(bt.trades.length>=4 && (!best||bt.totalRet>best.ret)) best={s,pa,pb,ret:bt.totalRet,win:bt.winRate}; }
+  let ruleNow=null;
+  if(best){ const pos=strategyPositions(best.s,kl,best.pa,best.pb); ruleNow=pos[pos.length-1]; }
+  let confd=forca;
+  if(cur==='alta'&&med==='alta')confd+=12;
+  if(ruleNow===1)confd+=10;
+  if(med==='queda')confd-=30;
+  if(buyTrig)confd+=6;
+  confd=Math.max(0,Math.min(100,Math.round(confd)));
+  return {a,price,med,cur,forca,sinal,motivo,sc,best,ruleNow,confd};
+}
+function trendTag(t){ return t==='alta'?{a:'▲',c:'up',t:'ALTA'}:t==='queda'?{a:'▼',c:'down',t:'QUEDA'}:{a:'▬',c:'flat',t:'LATERAL'}; }
+function renderSinalRow(d){
+  const med=trendTag(d.med), cur=trendTag(d.cur);
+  const sinLabel={comprar:'COMPRAR',aguardar:'AGUARDAR',sair:'SAIR',fora:'FORA'}[d.sinal];
+  const ruleTxt=d.best?`${STRAT_NAME[d.best.s]} ${d.best.s==='trend200'?d.best.pa:d.best.pa+'/'+d.best.pb} · acerto ${d.best.win.toFixed(0)}% · agora: <b class="${d.ruleNow===1?'up':'down'}">${d.ruleNow===1?'comprado':'fora'}</b>`:'—';
+  const confLab=d.confd<40?'baixa':d.confd<70?'média':'alta';
+  return `<div class="asset">
+    <div class="a-head">
+      <span class="a-sym">${d.a.id}</span>
+      <span class="a-price num">${fmtPrice(d.price)} <span class="dim" style="font-size:10px">USDT</span></span>
+      <span class="chg">Médio <b class="${med.c}">${med.a} ${med.t}</b></span>
+      <span class="chg">Curto <b class="${cur.c}">${cur.a} ${cur.t}</b></span>
+      <span>Força <b class="num">${d.forca}</b></span>
+      <span class="a-trend ${d.sc}" style="font-size:14px">${sinLabel}</span>
+    </div>
+    <div class="a-sub">
+      <span>Motivo: <b>${d.motivo}</b></span>
+      <span class="tag">Regra aprendida: ${ruleTxt}</span>
+      <span>Confiança <b class="num">${d.confd}/100</b> (${confLab})</span>
+    </div>
+  </div>`;
+}
+async function renderSinais(){
+  const host=document.getElementById('sinais');
+  const cryptos=ASSETS.filter(a=>a.type==='crypto');
+  host.innerHTML=cryptos.map(a=>`<div class="asset"><div class="a-head"><span class="a-sym">${a.id}</span><span class="loading">analisando histórico…</span></div></div>`).join('');
+  const rows=await Promise.all(cryptos.map(async a=>{
+    try{ const kl=await getCandles(a); if(!kl)throw 0; return renderSinalRow(analyzeSinais(a,kl)); }
+    catch(e){ return `<div class="asset"><div class="a-head"><span class="a-sym">${a.id}</span><span class="down">indisponível</span></div></div>`; }
+  }));
+  host.innerHTML=rows.join('');
+}
+
+/* ============================================================
    NAV / INIT
 ============================================================ */
 let focusIdx=0;
@@ -1037,6 +1122,7 @@ function showView(v){
   if(v==='backtest'){ loadTV(); updateTVLink(); }
   if(v==='onchain'){ renderOnchain(); }
   if(v==='carteira'){ pfBuildUniverseOptions(); }
+  if(v==='sinais'){ renderSinais(); }
 }
 function initBacktestControls(){
   const sel=document.getElementById('bt-asset');
@@ -1061,6 +1147,7 @@ async function init(){
     if(document.getElementById('view-painel').classList.contains('active'))renderPainel();
     else if(document.getElementById('view-onchain').classList.contains('active'))renderOnchain();
     else if(document.getElementById('view-carteira').classList.contains('active'))doCarteira();
+    else if(document.getElementById('view-sinais').classList.contains('active'))renderSinais();
   });
   document.addEventListener('keydown',e=>{
     if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;
@@ -1068,6 +1155,7 @@ async function init(){
     if(e.key==='2')showView('backtest');
     if(e.key==='3')showView('onchain');
     if(e.key==='4')showView('carteira');
+    if(e.key==='5')showView('sinais');
     if(e.key==='r'||e.key==='R')document.getElementById('refresh').click();
   });
   initBacktestControls();
