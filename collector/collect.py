@@ -1,32 +1,70 @@
 #!/usr/bin/env python3
 """
 Coletor do Crypto Panel — roda no GitHub Actions (cron horario) e tambem local.
-Sem dependencias: usa apenas a stdlib.
+Sem dependencias (stdlib) e sem chave para o caminho padrao.
 
-Grava em <repo>/data:
-  - cache.json          : preco/variacao + on-chain atual (fallback de mesma origem p/ o front)
-  - candles_1d.json     : velas diarias FECHADAS por ativo (fallback do backtest)
-  - onchain-history.json: snapshots on-chain acumulados (historico; limitado a ~90 dias)
+Fontes (gratis):
+  - Cripto : Binance (preco + velas, USDT)              [sem chave]
+  - Acoes BR: brapi.dev (B3, BRL, historico completo)   [sem chave]
+  - Cambio : AwesomeAPI USD-BRL (historico + atual)     [sem chave]
+  - On-chain: mempool.space (BTC) + DefiLlama (TVL)      [sem chave]
+  - Acoes US: brapi.dev (USD) — SO se BRAPI_TOKEN existir (token gratis do brapi.dev)
+
+Grava em <repo>/data: cache.json, candles_1d.json, onchain-history.json
 """
-import json, os, urllib.request, datetime
+import json, os, urllib.request, urllib.error, datetime, time
 
-ASSETS = [
-    ("BTC", "BTCUSDT", "Bitcoin"),
-    ("ETH", "ETHUSDT", "Ethereum"),
-    ("SOL", "SOLUSDT", "Solana"),
-    ("BNB", "BNBUSDT", "BSC"),
-    ("XRP", "XRPUSDT", "XRPL"),
-    ("SUI", "SUIUSDT", "Sui"),
+CRYPTO = [
+    {"id":"BTC","name":"Bitcoin","type":"crypto","market":"Cripto","ccy":"USDT","binance":"BTCUSDT","tv":"BINANCE:BTCUSDT","llama":"Bitcoin"},
+    {"id":"ETH","name":"Ethereum","type":"crypto","market":"Cripto","ccy":"USDT","binance":"ETHUSDT","tv":"BINANCE:ETHUSDT","llama":"Ethereum"},
+    {"id":"SOL","name":"Solana","type":"crypto","market":"Cripto","ccy":"USDT","binance":"SOLUSDT","tv":"BINANCE:SOLUSDT","llama":"Solana"},
+    {"id":"BNB","name":"BNB","type":"crypto","market":"Cripto","ccy":"USDT","binance":"BNBUSDT","tv":"BINANCE:BNBUSDT","llama":"BSC"},
+    {"id":"XRP","name":"XRP","type":"crypto","market":"Cripto","ccy":"USDT","binance":"XRPUSDT","tv":"BINANCE:XRPUSDT","llama":"XRPL"},
+    {"id":"SUI","name":"Sui","type":"crypto","market":"Cripto","ccy":"USDT","binance":"SUIUSDT","tv":"BINANCE:SUIUSDT","llama":"Sui"},
+]
+BR = [
+    {"id":"PETR4","name":"Petrobras","type":"stock","market":"Ações BR","ccy":"BRL","brapi":"PETR4","tv":"BMFBOVESPA:PETR4"},
+    {"id":"VALE3","name":"Vale","type":"stock","market":"Ações BR","ccy":"BRL","brapi":"VALE3","tv":"BMFBOVESPA:VALE3"},
+    {"id":"ITUB4","name":"Itaú","type":"stock","market":"Ações BR","ccy":"BRL","brapi":"ITUB4","tv":"BMFBOVESPA:ITUB4"},
+    {"id":"BBAS3","name":"Banco do Brasil","type":"stock","market":"Ações BR","ccy":"BRL","brapi":"BBAS3","tv":"BMFBOVESPA:BBAS3"},
+    {"id":"BBDC4","name":"Bradesco","type":"stock","market":"Ações BR","ccy":"BRL","brapi":"BBDC4","tv":"BMFBOVESPA:BBDC4"},
+    {"id":"B3SA3","name":"B3","type":"stock","market":"Ações BR","ccy":"BRL","brapi":"B3SA3","tv":"BMFBOVESPA:B3SA3"},
+    {"id":"WEGE3","name":"WEG","type":"stock","market":"Ações BR","ccy":"BRL","brapi":"WEGE3","tv":"BMFBOVESPA:WEGE3"},
+    {"id":"ABEV3","name":"Ambev","type":"stock","market":"Ações BR","ccy":"BRL","brapi":"ABEV3","tv":"BMFBOVESPA:ABEV3"},
+]
+US = [
+    {"id":"AAPL","name":"Apple","type":"stock","market":"Ações US","ccy":"USD","brapi":"AAPL","tv":"NASDAQ:AAPL"},
+    {"id":"MSFT","name":"Microsoft","type":"stock","market":"Ações US","ccy":"USD","brapi":"MSFT","tv":"NASDAQ:MSFT"},
+    {"id":"NVDA","name":"NVIDIA","type":"stock","market":"Ações US","ccy":"USD","brapi":"NVDA","tv":"NASDAQ:NVDA"},
+    {"id":"AMZN","name":"Amazon","type":"stock","market":"Ações US","ccy":"USD","brapi":"AMZN","tv":"NASDAQ:AMZN"},
+    {"id":"GOOGL","name":"Alphabet","type":"stock","market":"Ações US","ccy":"USD","brapi":"GOOGL","tv":"NASDAQ:GOOGL"},
+    {"id":"META","name":"Meta","type":"stock","market":"Ações US","ccy":"USD","brapi":"META","tv":"NASDAQ:META"},
+    {"id":"TSLA","name":"Tesla","type":"stock","market":"Ações US","ccy":"USD","brapi":"TSLA","tv":"NASDAQ:TSLA"},
+    {"id":"SPY","name":"S&P 500 ETF","type":"stock","market":"Ações US","ccy":"USD","brapi":"SPY","tv":"AMEX:SPY"},
 ]
 BINANCE_HOSTS = ["https://api.binance.com", "https://data-api.binance.vision"]
+BRAPI_TOKEN = os.environ.get("BRAPI_TOKEN", "").strip()
+UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(ROOT, "data")
+FRONT_KEYS = ("id", "name", "type", "market", "ccy", "tv", "binance", "llama")
 
 
-def get(url, timeout=25):
-    req = urllib.request.Request(url, headers={"User-Agent": "crypto-panel-collector"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.load(r)
+def get(url, timeout=25, tries=3):
+    last = None
+    for i in range(tries):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": UA})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            last = e
+            if e.code in (429, 502, 503):
+                time.sleep(1.5 * (i + 1)); continue
+            raise
+        except Exception as e:
+            last = e; time.sleep(1)
+    raise last
 
 
 def binance(path):
@@ -39,60 +77,80 @@ def binance(path):
     raise last
 
 
+def brapi_quote(symbol):
+    url = f"https://brapi.dev/api/quote/{symbol}?range=2y&interval=1d"
+    if BRAPI_TOKEN:
+        url += f"&token={BRAPI_TOKEN}"
+    d = get(url)
+    r = d["results"][0]
+    h = r.get("historicalDataPrice") or []
+    cd = [[p["date"] * 1000, p["open"], p["high"], p["low"], p["close"], p.get("volume") or 0]
+          for p in h if p.get("close") is not None]
+    cd = cd[:-1] if len(cd) > 1 else cd
+    price = r.get("regularMarketPrice") or (cd[-1][4] if cd else None)
+    ch24 = r.get("regularMarketChangePercent") or 0.0
+    return cd, price, ch24
+
+
+def fetch_fx():
+    d = get("https://economia.awesomeapi.com.br/json/daily/USD-BRL/360")
+    ser = sorted(({"t": int(x["timestamp"]) * 1000, "r": float(x["bid"])} for x in d), key=lambda z: z["t"])
+    cd = [[s["t"], s["r"], s["r"], s["r"], s["r"], 0] for s in ser]
+    cur = get("https://economia.awesomeapi.com.br/json/last/USD-BRL")["USDBRL"]
+    return cd, float(cur["bid"])
+
+
 def main():
     os.makedirs(DATA, exist_ok=True)
     now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat()
-    cache = {"updated": now, "assets": {}}
+    universe = CRYPTO + (BR + US if BRAPI_TOKEN else [])  # acoes so com token (brapi sem token = cota minima)
+    cache = {"updated": now, "fx": {}, "universe": [{k: a[k] for k in FRONT_KEYS if k in a} for a in universe], "assets": {}}
     candles = {"updated": now, "interval": "1d", "assets": {}}
     onchain = {"ts": now, "btc": {}, "chains": {}}
 
-    # preco + velas (Binance)
-    for sym, pair, llama in ASSETS:
-        try:
-            tk = binance(f"/api/v3/ticker/24hr?symbol={pair}")
-            kl = binance(f"/api/v3/klines?symbol={pair}&interval=1d&limit=400")
-            cache["assets"][sym] = {
-                "price": float(tk["lastPrice"]),
-                "ch24": float(tk["priceChangePercent"]),
-                "qv": float(tk["quoteVolume"]),
-            }
-            # exclui a ultima vela (dia em andamento); guarda [t,o,h,l,c,v]
-            candles["assets"][sym] = [
-                [k[0], float(k[1]), float(k[2]), float(k[3]), float(k[4]), float(k[5])]
-                for k in kl[:-1]
-            ]
-        except Exception as e:
-            cache["assets"][sym] = {"error": str(e)}
-            print("WARN preco", sym, e)
+    # cambio
+    try:
+        fxc, fxp = fetch_fx()
+        cache["fx"]["USDBRL"] = fxp
+        candles["assets"]["USDBRL"] = fxc
+    except Exception as e:
+        cache["fx"]["USDBRL"] = None; print("WARN fx", e)
 
-    # on-chain BTC (mempool.space)
+    # ativos
+    for a in universe:
+        try:
+            if a["type"] == "crypto":
+                tk = binance(f"/api/v3/ticker/24hr?symbol={a['binance']}")
+                kl = binance(f"/api/v3/klines?symbol={a['binance']}&interval=1d&limit=500")
+                price = float(tk["lastPrice"]); ch24 = float(tk["priceChangePercent"])
+                cd = [[k[0], float(k[1]), float(k[2]), float(k[3]), float(k[4]), float(k[5])] for k in kl[:-1]]
+            else:
+                cd, price, ch24 = brapi_quote(a["brapi"]); time.sleep(0.3)
+            cache["assets"][a["id"]] = {"price": price, "ch24": ch24, "ccy": a["ccy"], "type": a["type"], "market": a["market"]}
+            candles["assets"][a["id"]] = cd
+        except Exception as e:
+            cache["assets"][a["id"]] = {"error": str(e), "ccy": a["ccy"], "type": a["type"], "market": a["market"]}
+            print("WARN ativo", a["id"], e)
+
+    # on-chain BTC
     try:
         hr = get("https://mempool.space/api/v1/mining/hashrate/3d")
         fees = get("https://mempool.space/api/v1/fees/recommended")
         mp = get("https://mempool.space/api/mempool")
-        onchain["btc"] = {
-            "hashrate": hr.get("currentHashrate"),
-            "difficulty": hr.get("currentDifficulty"),
-            "feeHalfHour": fees.get("halfHourFee"),
-            "feeFastest": fees.get("fastestFee"),
-            "mempoolCount": mp.get("count"),
-        }
+        onchain["btc"] = {"hashrate": hr.get("currentHashrate"), "difficulty": hr.get("currentDifficulty"),
+                          "feeHalfHour": fees.get("halfHourFee"), "feeFastest": fees.get("fastestFee"),
+                          "mempoolCount": mp.get("count")}
     except Exception as e:
-        onchain["btc"] = {"error": str(e)}
-        print("WARN btc onchain", e)
-
-    # TVL por chain (DefiLlama)
-    for sym, pair, llama in ASSETS:
-        if sym == "BTC":
+        onchain["btc"] = {"error": str(e)}; print("WARN btc onchain", e)
+    for a in CRYPTO:
+        if a["id"] == "BTC":
             continue
         try:
-            s = get("https://api.llama.fi/v2/historicalChainTvl/" + llama)
-            onchain["chains"][sym] = {"tvl": s[-1]["tvl"]} if s else {"error": "empty"}
+            s = get("https://api.llama.fi/v2/historicalChainTvl/" + a["llama"])
+            onchain["chains"][a["id"]] = {"tvl": s[-1]["tvl"]} if s else {"error": "empty"}
         except Exception as e:
-            onchain["chains"][sym] = {"error": str(e)}
-            print("WARN tvl", sym, e)
-
-    cache["onchain"] = onchain  # snapshot atual tambem no cache (fallback da tela on-chain)
+            onchain["chains"][a["id"]] = {"error": str(e)}
+    cache["onchain"] = onchain
 
     with open(os.path.join(DATA, "cache.json"), "w") as f:
         json.dump(cache, f, separators=(",", ":"))
@@ -108,12 +166,12 @@ def main():
         except Exception:
             hist = []
     hist.append(onchain)
-    hist = hist[-2160:]  # ~90 dias em cadencia horaria
+    hist = hist[-2160:]
     with open(hist_path, "w") as f:
         json.dump(hist, f, separators=(",", ":"))
 
-    ok = [s for s in cache["assets"] if "price" in cache["assets"][s]]
-    print(f"collected {now} | precos ok: {ok} | hist len: {len(hist)}")
+    ok = [k for k, v in cache["assets"].items() if "price" in v]
+    print(f"collected {now} | ok {len(ok)}/{len(universe)} | US={'on' if BRAPI_TOKEN else 'off'} | fx {cache['fx'].get('USDBRL')} | hist {len(hist)}")
 
 
 if __name__ == "__main__":
