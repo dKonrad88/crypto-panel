@@ -168,6 +168,23 @@
       <a class="btn" id="bt-tvlink" target="_blank" rel="noopener">Abrir no TradingView ↗</a>
     </div>
 
+    <div class="controls" id="sweep-controls" style="padding-top:2px">
+      <div class="ctl"><label>Varredura — <span id="lbl-sa">param A</span></label>
+        <div style="display:flex;gap:4px">
+          <input type="number" id="sw-a0" placeholder="de" style="width:54px">
+          <input type="number" id="sw-a1" placeholder="até" style="width:54px">
+          <input type="number" id="sw-as" placeholder="passo" step="any" style="width:56px">
+        </div></div>
+      <div class="ctl" id="sw-b-wrap"><label><span id="lbl-sb">param B</span></label>
+        <div style="display:flex;gap:4px">
+          <input type="number" id="sw-b0" placeholder="de" style="width:54px">
+          <input type="number" id="sw-b1" placeholder="até" style="width:54px">
+          <input type="number" id="sw-bs" placeholder="passo" step="any" style="width:56px">
+        </div></div>
+      <button class="btn" id="bt-sweep">▦ Tabela de resultados</button>
+      <span class="hint" style="padding:0;align-self:center">testa todas as combinações do range de uma vez</span>
+    </div>
+
     <div class="bt-grid">
       <div>
         <div class="panelbox">
@@ -191,6 +208,11 @@
           <div class="body" style="padding:0"><div id="tvchart"></div></div>
         </div>
       </div>
+    </div>
+
+    <div class="panelbox" id="sweepbox" style="display:none;margin:0 6px 16px">
+      <h3>Varredura de parâmetros <span class="dim" id="sweep-sub" style="text-transform:none;font-weight:400"></span></h3>
+      <div class="scroll" style="max-height:360px"><table class="trades" id="sweep-table"><thead></thead><tbody></tbody></table></div>
     </div>
   </section>
 
@@ -571,33 +593,101 @@ function drawEquity(eq,cap){
     <polyline points="${pts}" fill="none" stroke="var(--txt)" stroke-width="1.2"/>`;
 }
 
-/* otimização: varre grade pequena de (pa,pb) e ranqueia por retorno */
-async function doOptimize(){
-  const btn=document.getElementById('bt-opt');btn.textContent='varrendo…';btn.disabled=true;
+/* ===== VARREDURA: roda um range de parâmetros e mostra TODOS em tabela ordenável ===== */
+const SWEEP_DEF={
+  emaCross:{a:[5,50,5],  b:[20,200,10], bUsed:true},
+  smaCross:{a:[5,50,5],  b:[20,200,10], bUsed:true},
+  rsi:     {a:[7,30,1],  b:[20,40,5],   bUsed:true},
+  macd:    {a:[6,16,2],  b:[20,40,2],   bUsed:true},
+  bbBreak: {a:[10,30,2], b:[1.5,3,0.5], bUsed:true},
+  trend200:{a:[50,250,10],b:[0,0,1],    bUsed:false},
+};
+function buildRange(a,b,s){const o=[];s=Math.abs(s)||1;if(b<a){const t=a;a=b;b=t;}
+  for(let v=a;v<=b+1e-9;v+=s)o.push(+v.toFixed(6));return o;}
+let SWEEP_ROWS=[],SWEEP_COLS=[],SWEEP_SORT={key:'ret',dir:-1};
+async function runSweep(){
+  const k=await ensureKlines();
+  const strat=document.getElementById('bt-strat').value;
+  const fee=+document.getElementById('bt-fee').value, cap=+document.getElementById('bt-cap').value;
+  const def=SWEEP_DEF[strat];
+  const A=buildRange(+document.getElementById('sw-a0').value,+document.getElementById('sw-a1').value,+document.getElementById('sw-as').value);
+  const B=def.bUsed?buildRange(+document.getElementById('sw-b0').value,+document.getElementById('sw-b1').value,+document.getElementById('sw-bs').value)
+                   :[+document.getElementById('bt-pb').value||0];
+  let combos=[];
+  for(const a of A)for(const b of B){
+    if((strat==='emaCross'||strat==='smaCross'||strat==='macd')&&a>=b)continue; // rápida>=lenta é degenerada
+    combos.push([a,b]);
+  }
+  let truncated=false;
+  if(combos.length>800){combos=combos.slice(0,800);truncated=true;}
+  const rows=combos.map(([a,b])=>{const r=runBacktest(k,strat,a,b,fee,cap);
+    return {a,b,ret:r.totalRet,vs:r.totalRet-r.bh,tr:r.trades.length,win:r.winRate,dd:r.mdd,sh:r.sharpe,exp:r.exposure};});
+  return {strat,def,rows,truncated};
+}
+async function doSweep(){
+  const btn=document.getElementById('bt-sweep');btn.disabled=true;btn.textContent='varrendo…';
   try{
-    const k=await ensureKlines();
-    const strat=document.getElementById('bt-strat').value;
-    const fee=+document.getElementById('bt-fee').value;
-    const cap=+document.getElementById('bt-cap').value;
-    let grid=[];
-    if(strat==='rsi'){ for(let p=7;p<=21;p+=7)for(let th=20;th<=35;th+=5)grid.push([p,th]); }
-    else if(strat==='bbBreak'){ for(let p=10;p<=30;p+=5)for(let d=1.5;d<=3;d+=0.5)grid.push([p,d]); }
-    else if(strat==='trend200'){ for(let p=100;p<=250;p+=25)grid.push([p,0]); }
-    else { for(let a=10;a<=40;a+=5)for(let b=a+10;b<=120;b+=15)grid.push([a,b]); }
-    let best=null;
-    for(const [pa,pb] of grid){
-      const r=runBacktest(k,strat,pa,pb,fee,cap);
-      if(!best||r.totalRet>best.r.totalRet)best={pa,pb,r};
-    }
-    if(best){
-      document.getElementById('bt-pa').value=best.pa;
-      document.getElementById('bt-pb').value=best.pb;
-      renderBtResult(best.r,cap);
-      document.getElementById('bt-eqhint').textContent=
-        `Melhor de ${grid.length} combinações · params ${best.pa}/${best.pb} · retorno ${fmtPct(best.r.totalRet)}.`;
-    }
+    const {strat,def,rows,truncated}=await runSweep();
+    SWEEP_SORT={key:'ret',dir:-1};
+    renderSweep(strat,def,rows,truncated);
+    document.getElementById('sweepbox').scrollIntoView({behavior:'smooth',block:'nearest'});
+  }catch(e){alert('Erro na varredura: '+e.message);}
+  finally{btn.disabled=false;btn.textContent='▦ Tabela de resultados';}
+}
+async function doOptimize(){ // mesmo range da varredura, mas carrega o melhor direto
+  const btn=document.getElementById('bt-opt');btn.disabled=true;btn.textContent='varrendo…';
+  try{
+    const {strat,def,rows,truncated}=await runSweep();
+    if(!rows.length){alert('Nenhuma combinação válida no range.');return;}
+    SWEEP_SORT={key:'ret',dir:-1};
+    renderSweep(strat,def,rows,truncated);
+    const best=rows.reduce((m,r)=>r.ret>m.ret?r:m);
+    document.getElementById('bt-pa').value=best.a;
+    document.getElementById('bt-pb').value=best.b;
+    await doBacktest();
   }catch(e){alert('Erro na otimização: '+e.message);}
-  finally{btn.textContent='⊞ Otimizar';btn.disabled=false;}
+  finally{btn.disabled=false;btn.textContent='⊞ Otimizar';}
+}
+function renderSweep(strat,def,rows,truncated){
+  SWEEP_ROWS=rows;
+  document.getElementById('sweepbox').style.display='';
+  const [la,lb]=STRAT_LABELS[strat];
+  document.getElementById('sweep-sub').textContent=
+    `· ${rows.length} combinações${truncated?' (limitado a 800)':''} · clique no cabeçalho p/ ordenar, na linha p/ carregar no gráfico`;
+  SWEEP_COLS=[
+    {k:'a',t:la},
+    ...(def.bUsed?[{k:'b',t:lb}]:[]),
+    {k:'ret',t:'Retorno',pct:1,col:1},
+    {k:'vs', t:'vs B&H', pct:1,col:1},
+    {k:'tr', t:'Trades'},
+    {k:'win',t:'Win%',suf:'%',dec:0},
+    {k:'dd', t:'DD máx',suf:'%',dec:1,down:1},
+    {k:'sh', t:'Sharpe',dec:2},
+    {k:'exp',t:'Expos.',suf:'%',dec:0},
+  ];
+  drawSweepTable();
+}
+function fmtCell(c,v){
+  if(c.pct)return fmtPct(v);
+  if(c.dec!=null)return v.toFixed(c.dec)+(c.suf||'');
+  return v+(c.suf||'');
+}
+function cellCls(c,v){return c.col?cls(v):(c.down?'down':'');}
+function drawSweepTable(){
+  const rows=[...SWEEP_ROWS].sort((x,y)=>(x[SWEEP_SORT.key]-y[SWEEP_SORT.key])*SWEEP_SORT.dir);
+  const bestRet=Math.max(...SWEEP_ROWS.map(r=>r.ret));
+  const thead=document.querySelector('#sweep-table thead');
+  thead.innerHTML='<tr>'+SWEEP_COLS.map(c=>`<th data-k="${c.k}" style="cursor:pointer">${c.t}${SWEEP_SORT.key===c.k?(SWEEP_SORT.dir<0?' ▾':' ▴'):''}</th>`).join('')+'</tr>';
+  thead.querySelectorAll('th').forEach(th=>th.onclick=()=>{const k=th.dataset.k;
+    if(SWEEP_SORT.key===k)SWEEP_SORT.dir*=-1;else SWEEP_SORT={key:k,dir:-1};drawSweepTable();});
+  const tb=document.querySelector('#sweep-table tbody');
+  tb.innerHTML=rows.map(r=>'<tr data-a="'+r.a+'" data-b="'+r.b+'" title="carregar no gráfico" style="cursor:pointer'+(r.ret===bestRet?';background:rgba(63,185,80,.10)':'')+(r.tr===0?';opacity:.4':'')+'">'+
+    SWEEP_COLS.map(c=>`<td class="num ${cellCls(c,r[c.k])}">${fmtCell(c,r[c.k])}</td>`).join('')+'</tr>').join('');
+  tb.querySelectorAll('tr').forEach(tr=>tr.onclick=()=>{
+    document.getElementById('bt-pa').value=tr.dataset.a;
+    document.getElementById('bt-pb').value=tr.dataset.b;
+    doBacktest();
+  });
 }
 
 /* TradingView widget */
@@ -626,6 +716,13 @@ function onStratChange(){
   document.getElementById('bt-pa').value=da;
   document.getElementById('bt-pb').value=db;
   document.querySelector('[data-p="b"]').style.opacity=(lb.includes('não usado')?0.35:1);
+  // defaults da varredura por estratégia
+  const sd=SWEEP_DEF[document.getElementById('bt-strat').value];
+  document.getElementById('lbl-sa').textContent=la;
+  document.getElementById('lbl-sb').textContent=lb;
+  document.getElementById('sw-a0').value=sd.a[0]; document.getElementById('sw-a1').value=sd.a[1]; document.getElementById('sw-as').value=sd.a[2];
+  document.getElementById('sw-b0').value=sd.b[0]; document.getElementById('sw-b1').value=sd.b[1]; document.getElementById('sw-bs').value=sd.b[2];
+  document.getElementById('sw-b-wrap').style.display=sd.bUsed?'':'none';
 }
 
 /* ============================================================
@@ -708,6 +805,7 @@ function initBacktestControls(){
   document.getElementById('bt-tf').addEventListener('change',()=>{loadTV();});
   document.getElementById('bt-run').addEventListener('click',doBacktest);
   document.getElementById('bt-opt').addEventListener('click',doOptimize);
+  document.getElementById('bt-sweep').addEventListener('click',doSweep);
   updateTVLink();
 }
 function tick(){
